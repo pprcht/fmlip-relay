@@ -22,6 +22,10 @@ Usage
 
     # Dummy (no model required)
     fmlip-relay-server --port 54321 --backend dummy
+
+    # Single-point test — loads geometry, runs one evaluation, prints summary, exits
+    fmlip-relay-server --backend mace_mp --test molecule.xyz
+    fmlip-relay-server --backend lj      --test crystal.xyz
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ from .backends import get_backend_class
 from .backends.mace_mp  import _KNOWN_MODELS as _MACE_MP_MODELS,  _DEFAULT_MODEL as _MACE_MP_DEFAULT
 from .backends.mace_off import _KNOWN_MODELS as _MACE_OFF_MODELS, _DEFAULT_MODEL as _MACE_OFF_DEFAULT
 from . import server
+from . import test_mode
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -44,10 +49,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # ── required ──────────────────────────────────────────────────────────────
-    p.add_argument("--port",    type=int, required=True,
-                   help="TCP port to listen on (loopback only)")
+    p.add_argument("--port",    type=int, default=None,
+                   help="TCP port to listen on (loopback only). "
+                        "Required unless --test is used.")
     p.add_argument("--backend", type=str, required=True,
                    help="Backend name: mace | mace_mp | mace_off | lj | dummy")
+
+    # ── test mode ─────────────────────────────────────────────────────────────
+    p.add_argument("--test", type=str, default=None, metavar="GEOMETRY",
+                   help="Run a single-point calculation on the given geometry "
+                        "file (XYZ / extended-XYZ), print a summary, and exit. "
+                        "--port is not required in this mode.")
 
     # ── logging ───────────────────────────────────────────────────────────────
     p.add_argument("--log",      type=str, default=None,
@@ -162,12 +174,23 @@ def main(argv: list[str] | None = None) -> None:
     _configure_logging(args.loglevel, args.log)
     log = logging.getLogger(__name__)
 
+    # ── validate port requirement ─────────────────────────────────────────────
+    if args.test is None and args.port is None:
+        parser.error("--port is required when not using --test")
+
+    # ── build backend (shared by both modes) ──────────────────────────────────
     try:
         backend = _build_backend(args)
     except (KeyError, ValueError) as exc:
         parser.error(str(exc))
 
     log.info("Backend '%s' loaded successfully.", backend.name)
+
+    # ── test mode ─────────────────────────────────────────────────────────────
+    if args.test is not None:
+        sys.exit(test_mode.run_test(backend, args.test))
+
+    # ── server mode ───────────────────────────────────────────────────────────
     server.run(args.port, backend)
 
 

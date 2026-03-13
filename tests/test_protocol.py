@@ -30,7 +30,7 @@ def socketpair():
     return socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
 
 
-def _encode_compute_payload(natoms, atomic_numbers, positions, cell, pbc, compute_stress):
+def _encode_compute_payload(natoms, atomic_numbers, positions, cell, pbc, compute_stress, charge, spin):
     """Encode a COMPUTE request body (without the leading msg_type int32)."""
     buf  = struct.pack('<i', natoms)
     buf += atomic_numbers.astype('<i4').tobytes()
@@ -38,6 +38,8 @@ def _encode_compute_payload(natoms, atomic_numbers, positions, cell, pbc, comput
     buf += cell.astype('<f8').tobytes()
     buf += struct.pack('<3i', *[int(p) for p in pbc])
     buf += struct.pack('<i',  int(compute_stress))
+    buf += struct.pack('<i', int(charge))
+    buf += struct.pack('<i', int(spin))
     return buf
 
 
@@ -134,6 +136,8 @@ class TestComputeRequest:
             cell           = np.eye(3, dtype=np.float64),
             pbc            = np.array([False, False, False]),
             compute_stress = False,
+            charge         = 0,
+            spin           = 1,
         )
 
     def test_attributes_accessible(self):
@@ -144,15 +148,18 @@ class TestComputeRequest:
         assert req.cell.shape           == (3, 3)
         assert req.pbc.shape            == (3,)
         assert req.compute_stress is False
+        assert req.charge == 0
+        assert req.spin   == 1
 
 
 # ── read_compute_request round-trip ──────────────────────────────────────────
 
 class TestReadComputeRequest:
-    def _write_and_read(self, natoms, atomic_numbers, positions, cell, pbc, compute_stress):
+    def _write_and_read(self, natoms, atomic_numbers, positions, cell, pbc, compute_stress,
+                        charge=0, spin=1):
         w, r = socketpair()
         payload = _encode_compute_payload(
-            natoms, atomic_numbers, positions, cell, pbc, compute_stress
+            natoms, atomic_numbers, positions, cell, pbc, compute_stress, charge, spin
         )
         w.sendall(payload)
         w.close()
@@ -167,7 +174,7 @@ class TestReadComputeRequest:
         cell = np.eye(3) * 10.0
         pbc  = np.array([False, False, False])
 
-        req = self._write_and_read(N, Z, pos, cell, pbc, False)
+        req = self._write_and_read(N, Z, pos, cell, pbc, False, charge=0, spin=1)
 
         assert req.natoms == N
         np.testing.assert_array_equal(req.atomic_numbers, Z)
@@ -175,6 +182,8 @@ class TestReadComputeRequest:
         np.testing.assert_allclose(req.cell,      cell)
         np.testing.assert_array_equal(req.pbc,    pbc)
         assert req.compute_stress is False
+        assert req.charge == 0
+        assert req.spin   == 1
 
     def test_roundtrip_periodic(self):
         N = 5
@@ -183,10 +192,12 @@ class TestReadComputeRequest:
         cell = np.diag([4.05, 4.05, 4.05])
         pbc  = np.array([True, True, True])
 
-        req = self._write_and_read(N, Z, pos, cell, pbc, True)
+        req = self._write_and_read(N, Z, pos, cell, pbc, True, charge=-1, spin=2)
 
         assert req.compute_stress is True
         np.testing.assert_array_equal(req.pbc, pbc)
+        assert req.charge == -1
+        assert req.spin   == 2
 
     def test_invalid_natoms_raises(self):
         w, r = socketpair()

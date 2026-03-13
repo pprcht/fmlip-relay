@@ -80,6 +80,8 @@ class LJBackend(BackendBase):
                 cell:           np.ndarray,
                 pbc:            np.ndarray,
                 compute_stress: bool,
+                charge:         int=0,
+                spin:           int=1,
                 ) -> tuple[float, np.ndarray, np.ndarray]:
 
         natoms = positions.shape[0]

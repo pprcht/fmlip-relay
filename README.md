@@ -102,6 +102,7 @@ use fmlip_relay_client
 integer :: ierr
 integer :: pbc(3), atomic_numbers(64)
 real(8) :: pos(3,64), cell(3,3), energy, forces(3,64), stress(3,3)
+integer :: charge, spin
 
 ! Spawn server — blocks until Python prints "READY"
 call mlip_init(1, 54321, &
@@ -111,7 +112,9 @@ call mlip_init(1, 54321, &
 ! Evaluate
 pbc = [1, 1, 1]
 atomic_numbers = 13   ! aluminium
-call mlip_compute(1, 64, atomic_numbers, pos, cell, pbc, 1, &
+charge = 0 
+spin = 1
+call mlip_compute(1, 64, atomic_numbers, pos, cell, pbc, 1, charge, spin, &
                   energy, forces, stress, ierr)
 
 ! Teardown
@@ -156,6 +159,8 @@ Offset      Type           Field
  8+28N      float64 × 9    cell            [row-major,  Angstrom]
  8+28N+72   int32  × 3     pbc             (1=periodic per axis)
  8+28N+84   int32          compute_stress  (0/1)
+ 8+28N+88   int32          charge
+ 8+28N+92   int32          spin 
 ```
 
 ### Response (Python → Fortran)

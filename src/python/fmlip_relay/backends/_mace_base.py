@@ -28,6 +28,8 @@ class _MACEComputeMixin(BackendBase):
                 cell:           np.ndarray,
                 pbc:            np.ndarray,
                 compute_stress: bool,
+                charge:         int,
+                spin:           int,
                 ) -> tuple[float, np.ndarray, np.ndarray]:
         from ase import Atoms
 
@@ -37,6 +39,8 @@ class _MACEComputeMixin(BackendBase):
             cell=cell,
             pbc=pbc,
         )
+        atoms.info["charge"] = charge 
+        atoms.info["spin"] = spin
         atoms.calc = self._calc
 
         energy = float(atoms.get_potential_energy())

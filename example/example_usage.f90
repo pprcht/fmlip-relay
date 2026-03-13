@@ -114,7 +114,7 @@ program example_usage
   call mlip_ping(1,ierr)
   if (ierr == MLIP_OK) write(stdout,*) " PING OK"
 
-  call mlip_compute(1,NATOMS,atomic_numbers,positions,cell,pbc,1, &
+  call mlip_compute(1,NATOMS,atomic_numbers,positions,cell,pbc,1,0,1, &
                     energy,forces,stress,ierr)
   if (ierr /= MLIP_OK) stop "mlip_compute failed"
 
@@ -152,7 +152,7 @@ program example_usage
     pbc = [1,1,1]
     atomic_numbers = 6
 
-    call mlip_compute(iid,NATOMS,atomic_numbers,positions,cell,pbc,0, &
+    call mlip_compute(iid,NATOMS,atomic_numbers,positions,cell,pbc,0,0,1, &
                       energy,forces,stress,ierr)
     if (ierr == MLIP_OK) then
       !$omp critical

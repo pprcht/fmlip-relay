@@ -44,6 +44,8 @@ def _handle_compute(conn: socket.socket, backend: BackendBase) -> None:
             req.cell,
             req.pbc,
             req.compute_stress,
+            req.charge,
+            req.spin,
         )
         dt_ms = (time.perf_counter() - t0) * 1e3
         log.debug("COMPUTE natoms=%d  E=%.6f eV  dt=%.2f ms",

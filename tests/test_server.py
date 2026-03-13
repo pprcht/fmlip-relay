@@ -40,7 +40,8 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _encode_compute(natoms, atomic_numbers, positions, cell, pbc, compute_stress):
+def _encode_compute(natoms, atomic_numbers, positions, cell, pbc, compute_stress,
+                    charge=0, spin=1):
     buf  = struct.pack('<i', MSG_COMPUTE)
     buf += struct.pack('<i', natoms)
     buf += atomic_numbers.astype('<i4').tobytes()
@@ -48,6 +49,8 @@ def _encode_compute(natoms, atomic_numbers, positions, cell, pbc, compute_stress
     buf += cell.astype('<f8').tobytes()
     buf += struct.pack('<3i', *[int(p) for p in pbc])
     buf += struct.pack('<i',  int(compute_stress))
+    buf += struct.pack('<i',  int(charge))
+    buf += struct.pack('<i',  int(spin))
     return buf
 
 
@@ -220,6 +223,16 @@ class TestCompute:
         ping_status, = struct.unpack('<i', recv_exactly(c, 4))
         assert ping_status == STATUS_OK
         c.close()
+
+    def test_charge_and_spin_accepted(self, dummy_server):
+        """Non-default charge and spin must not cause an error response."""
+        N = 2
+        Z, pos, cell, pbc = _simple_config(N)
+        c = dummy_server.connect()
+        c.sendall(_encode_compute(N, Z, pos, cell, pbc, False, charge=-1, spin=3))
+        status, _, _, _ = _read_response(c, N)
+        c.close()
+        assert status == STATUS_OK
 
 
 # ── QUIT ──────────────────────────────────────────────────────────────────────

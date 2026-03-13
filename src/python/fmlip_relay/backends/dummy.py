@@ -19,7 +19,7 @@ class DummyBackend(BackendBase):
     def __init__(self, seed: int = 42):
         self._rng = np.random.default_rng(seed)
 
-    def compute(self, atomic_numbers, positions, cell, pbc, compute_stress):
+    def compute(self, atomic_numbers, positions, cell, pbc, compute_stress, charge=0, spin=1):
         natoms = positions.shape[0]
         energy = float(self._rng.uniform(-10.0, -1.0))
         forces = self._rng.uniform(-0.5, 0.5, (natoms, 3))

@@ -15,6 +15,8 @@ Request layout (Fortran → Python)
   float64 × 9    cell        [row-major,  Angstrom]
   int32  × 3     pbc         (1 = periodic)
   int32          compute_stress (0/1)
+  int32          molecular charge
+  int32          molecular spin
 
 Response layout (Python → Fortran)
 ────────────────────────────────────
@@ -65,15 +67,17 @@ def send_all(conn: socket.socket, data: bytes) -> None:
 
 class ComputeRequest:
     """Decoded COMPUTE request."""
-    __slots__ = ("natoms", "atomic_numbers", "positions", "cell", "pbc", "compute_stress")
+    __slots__ = ("natoms", "atomic_numbers", "positions", "cell", "pbc", "compute_stress", "charge", "spin")
 
-    def __init__(self, natoms, atomic_numbers, positions, cell, pbc, compute_stress):
+    def __init__(self, natoms, atomic_numbers, positions, cell, pbc, compute_stress, charge, spin):
         self.natoms         = natoms
         self.atomic_numbers = atomic_numbers   # (N,)   int32
         self.positions      = positions        # (N, 3) float64, Angstrom
         self.cell           = cell             # (3, 3) float64, Angstrom
         self.pbc            = pbc              # (3,)   bool
         self.compute_stress = compute_stress   # bool
+        self.charge         = charge           # int32
+        self.spin           = spin             # int32
 
 
 def read_compute_request(conn: socket.socket) -> ComputeRequest:
@@ -87,8 +91,10 @@ def read_compute_request(conn: socket.socket) -> ComputeRequest:
     cell           = np.frombuffer(recv_exactly(conn, 9 * 8),       dtype='<f8').reshape(3, 3).copy()
     pbc_raw        = np.array(struct.unpack('<3i', recv_exactly(conn, 12)), dtype=bool)
     compute_stress = bool(struct.unpack('<i', recv_exactly(conn, 4))[0])
+    charge = struct.unpack('<i', recv_exactly(conn, 4))[0]
+    spin   = struct.unpack('<i', recv_exactly(conn, 4))[0]
 
-    return ComputeRequest(natoms, atomic_numbers, positions, cell, pbc_raw, compute_stress)
+    return ComputeRequest(natoms, atomic_numbers, positions, cell, pbc_raw, compute_stress, charge, spin)
 
 
 # ── response writer ───────────────────────────────────────────────────────────

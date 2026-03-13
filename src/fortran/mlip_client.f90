@@ -11,7 +11,7 @@
 !>       server_cmd is the full shell command, e.g.:
 !>         "fmlip-relay-server --port 54321 --backend mace --model /path/to/model.model"
 !>
-!>   mlip_compute   (iid, natoms, positions, cell, pbc, compute_stress,
+!>   mlip_compute   (iid, natoms, positions, cell, pbc, compute_stress, charge, spin,
 !>                   energy, forces, stress, ierr)
 !>       Send one COMPUTE request, receive energy/forces/stress.
 !>
@@ -110,8 +110,8 @@ module fmlip_relay_client
   ! ── instance state ────────────────────────────────────────────────────────────
   type :: mlip_instance_t
     logical  :: active = .false.
-    integer  :: sock_fd = -1    ! TCP socket file descriptor
-    integer  :: proc_pid = -1    ! child PID
+    integer  :: sock_fd = -1      ! TCP socket file descriptor
+    integer  :: proc_pid = -1     ! child PID
     integer  :: stdout_fd = -1    ! pipe to child stdout (used at startup)
     integer  :: port = -1
   end type
@@ -188,22 +188,25 @@ contains
   !> mlip_compute – send coordinates, receive energy/forces/stress
   ! ════════════════════════════════════════════════════════════════════════════
   subroutine mlip_compute(iid,natoms,atomic_numbers,positions,cell,pbc,compute_stress, &
-                          energy,forces,stress,ierr)
-    integer,intent(in)  :: iid
-    integer,intent(in)  :: natoms
-    integer,intent(in)  :: atomic_numbers(natoms)  !< Z for each atom (e.g. 13=Al, 8=O)
-    real(wp),intent(in)  :: positions(3,natoms)   !< (xyz, atom), Angstrom
-    real(wp),intent(in)  :: cell(3,3)             !< row vectors
-    integer,intent(in)  :: pbc(3)                 !< 1=periodic, 0=not
-    integer,intent(in)  :: compute_stress         !< 1 to request stress
+     &                    charge,spin, &
+     &                    energy,forces,stress,ierr)
+    integer,intent(in)   :: iid
+    integer,intent(in)   :: natoms
+    integer,intent(in)   :: atomic_numbers(natoms)  !< Z for each atom (e.g. 13=Al, 8=O)
+    real(wp),intent(in)  :: positions(3,natoms)     !< (xyz, atom), Angstrom
+    real(wp),intent(in)  :: cell(3,3)               !< row vectors
+    integer,intent(in)   :: pbc(3)                  !< 1=periodic, 0=not
+    integer,intent(in)   :: compute_stress          !< 1 to request stress
+    integer,intent(in)   :: charge                  !< molecular charge
+    integer,intent(in)   :: spin                    !< molecular spin
     real(wp),intent(out) :: energy
     real(wp),intent(out) :: forces(3,natoms)
     real(wp),intent(out) :: stress(3,3)
-    integer,intent(out) :: ierr
+    integer,intent(out)  :: ierr
 
     integer(c_int) :: hdr(2),pbc_c(3),stress_flag_c(1),status(1),rc
-    integer(c_int) :: atomic_numbers_c(natoms)
-    real(wp)        :: pos_buf(3*natoms),cell_buf(9),stress_buf(9),energy_buf(1)
+    integer(c_int) :: atomic_numbers_c(natoms),charge_c(1),spin_c(1)
+    real(wp)       :: pos_buf(3*natoms),cell_buf(9),stress_buf(9),energy_buf(1)
 
     ierr = MLIP_ERR
     energy = 0.0_wp
@@ -220,6 +223,8 @@ contains
     pbc_c = int(pbc,c_int)
     atomic_numbers_c = int(atomic_numbers,c_int)
     stress_flag_c(1) = int(compute_stress,c_int)
+    charge_c(1) = int(charge,c_int)
+    spin_c(1) = int(spin,c_int)
 
     ! ── send header: msg_type, natoms ────────────────────────────────────────
     hdr(1) = int(MSG_COMPUTE,c_int)
@@ -240,6 +245,12 @@ contains
 
     ! ── send stress flag (1 int32) ───────────────────────────────────────────
     rc = sock_send_bytes(iid,stress_flag_c,4); if (rc /= 0) return
+
+    ! ── send molecular charge (1 int32) ──────────────────────────────────────
+    rc = sock_send_bytes(iid,charge_c,4); if (rc /= 0) return
+
+    ! ── send molecular spun (1 int32) ────────────────────────────────────────
+    rc = sock_send_bytes(iid,spin_c,4); if (rc /= 0) return
 
     ! ── receive status (int32) ───────────────────────────────────────────────
     rc = sock_recv_bytes(iid,status,4); if (rc /= 0) return

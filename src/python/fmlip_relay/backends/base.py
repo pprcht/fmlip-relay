@@ -27,6 +27,8 @@ class BackendBase(ABC):
                 cell:           np.ndarray,
                 pbc:            np.ndarray,
                 compute_stress: bool,
+                charge: int,
+                spin: int,
                 ) -> tuple[float, np.ndarray, np.ndarray]:
         """
         Evaluate the potential.
@@ -38,6 +40,8 @@ class BackendBase(ABC):
         cell           : (3, 3) float64 – lattice row vectors, Angstrom
         pbc            : (3,)   bool    – periodic boundary flags
         compute_stress : bool           – whether to compute the stress tensor
+        charge         : int32          - molecular charge
+        spin           : int32          - molecular spin information
 
         Returns
         -------

@@ -1,0 +1,6 @@
+example/build
+build/
+*__pycache__
+*.egg-info
+_build*
+.pytest_cache

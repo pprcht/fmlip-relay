@@ -172,3 +172,14 @@ void kill_process_c(int pid)
 {
     if (pid > 0) kill((pid_t)pid, SIGTERM);
 }
+
+
+/**
+ * Thin shim exposing getpid() with a plain C int return type.
+ * Fortran's iso_c_binding can map this directly via c_int.
+ * Cast is explicit to silence any implicit-narrowing warnings
+ * (pid_t is typically a 32-bit int on modern platforms anyway). 
+ */
+int get_pid_shim(void) {
+    return (int)getpid();
+}

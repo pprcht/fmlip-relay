@@ -41,7 +41,7 @@ module fmlip_relay_client
 
   ! ── public symbols ──────────────────────────────────────────────────────────
   public :: mlip_init,mlip_compute,mlip_ping,mlip_finalize,mlip_finalize_all
-  public :: MLIP_MAX_INSTANCES,MLIP_OK,MLIP_ERR
+  public :: MLIP_MAX_INSTANCES,MLIP_OK,MLIP_ERR,GET_PID
 
   ! ── constants ────────────────────────────────────────────────────────────────
   integer,parameter :: MLIP_MAX_INSTANCES = 16
@@ -105,6 +105,11 @@ module fmlip_relay_client
       import c_int
       integer(c_int),value :: useconds
     end subroutine
+
+    function get_pid_shim() bind(C,name="get_pid_shim") result(pid)
+      import c_int
+      integer(c_int) :: pid
+    end function get_pid_shim
   end interface
 
   ! ── instance state ────────────────────────────────────────────────────────────
@@ -350,7 +355,7 @@ contains
     integer :: rc
     rc = int(sock_send_c(int(instances(iid)%sock_fd,c_int),buf, &
                          int(nbytes,c_int)))
-  end function
+  end function sock_send_bytes
 
   !> Receive raw bytes via instance iid socket
   function sock_recv_bytes(iid,buf,nbytes) result(rc)
@@ -359,7 +364,7 @@ contains
     integer :: rc
     rc = int(sock_recv_c(int(instances(iid)%sock_fd,c_int),buf, &
                          int(nbytes,c_int)))
-  end function
+  end function sock_recv_bytes
 
   !> Send n float64 values
   function sock_send_r8(iid,arr,n) result(rc)
@@ -369,7 +374,7 @@ contains
     integer(c_int) :: buf(2*n)   ! 2 × int32 per float64
     buf = transfer(arr(1:n),buf)
     rc = int(sock_send_c(int(instances(iid)%sock_fd,c_int),buf,int(n*8,c_int)))
-  end function
+  end function sock_send_r8
 
   !> Receive n float64 values into arr(1:n)
   function sock_recv_r8(iid,arr,n) result(rc)
@@ -379,14 +384,14 @@ contains
     integer(c_int) :: buf(2*n)
     rc = int(sock_recv_c(int(instances(iid)%sock_fd,c_int),buf,int(n*8,c_int)))
     if (rc == 0) arr(1:n) = transfer(buf,arr(1:n))
-  end function
+  end function sock_recv_r8
 
   !> Convert Fortran string to null-terminated C string
   function c_str(s) result(cs)
     character(len=*),intent(in) :: s
     character(kind=c_char,len=len_trim(s)+1) :: cs
     cs = trim(s)//c_null_char
-  end function
+  end function c_str
 
   !> Copy Fortran string to fixed-length C char array
   subroutine f_to_c_str(s,cs)
@@ -398,12 +403,18 @@ contains
       cs(i:i) = s(i:i)
     end do
     cs(n+1:n+1) = c_null_char
-  end subroutine
+  end subroutine f_to_c_str
 
   !> Portable microsecond sleep via C
   subroutine usleep_f(us)
     integer,intent(in) :: us
     call usleep(us)   ! POSIX usleep – available on Linux/macOS
-  end subroutine
+  end subroutine usleep_f
+
+  !> Returns a default Fortran integer for the current process PID
+  function get_pid() result(pid)
+    integer :: pid
+    pid = int(get_pid_shim())
+  end function get_pid
 
 end module fmlip_relay_client

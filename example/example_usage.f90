@@ -54,7 +54,7 @@ program example_usage
   integer :: pbc(3),atomic_numbers(NATOMS)
   real(wp) :: energy,forces(3,NATOMS),stress(3,3)
   real(wp) :: lj_epsilon,lj_sigma,lj_cutoff
-  integer :: ierr,i,iid
+  integer :: ierr,i,iid,pid
 
   ! ── parse arguments ──────────────────────────────────────────────────────────
   ! Usage:
@@ -64,12 +64,12 @@ program example_usage
   !   run_example mace_off [model_size]        e.g. small | medium | large
   !   run_example mace <model_path>
   if (command_argument_count() < 1) then
-    write(stdout,*) "Usage: run_example <backend> [options]"
-    write(stdout,*) "  dummy"
-    write(stdout,*) "  lj  [epsilon_eV]  [sigma_ang]  [cutoff_ang]"
-    write(stdout,*) "  mace_mp  [model_size]"
-    write(stdout,*) "  mace_off [model_size]"
-    write(stdout,*) "  mace  model_path"
+    write (stdout,*) "Usage: run_example <backend> [options]"
+    write (stdout,*) "  dummy"
+    write (stdout,*) "  lj  [epsilon_eV]  [sigma_ang]  [cutoff_ang]"
+    write (stdout,*) "  mace_mp  [model_size]"
+    write (stdout,*) "  mace_off [model_size]"
+    write (stdout,*) "  mace  model_path"
     stop 1
   end if
   call get_command_argument(1,backend_name)
@@ -100,44 +100,53 @@ program example_usage
   ! ════════════════════════════════════════════════════════════════════════════
   ! Demo 1: single instance
   ! ════════════════════════════════════════════════════════════════════════════
-  write(stdout,*) "=== Demo 1: single instance ==="
+  write (stdout,*) "=== Demo 1: single instance ==="
+
+  pid = get_pid()
+  write (stdout,*) "Process PID:",pid
 
   call make_fcc_positions(NATOMS,ALAT_DEFAULT,positions,cell)
   pbc = [1,1,1]
   atomic_numbers = 6    ! carbon – supported by all MACE model families
 
-  call build_server_cmd(backend_name,model_arg,BASE_PORT+1, &
+  call build_server_cmd(backend_name,model_arg,BASE_PORT+1, &  !> BASE_PORT could be replaced with pid
                         lj_epsilon,lj_sigma,lj_cutoff,server_cmd)
   call mlip_init(1,BASE_PORT+1,trim(server_cmd),TIMEOUT_SEC,ierr)
   if (ierr /= MLIP_OK) stop "mlip_init failed"
 
   call mlip_ping(1,ierr)
-  if (ierr == MLIP_OK) write(stdout,*) " PING OK"
+  if (ierr == MLIP_OK) write (stdout,*) " PING OK"
 
   call mlip_compute(1,NATOMS,atomic_numbers,positions,cell,pbc,1,0,1, &
                     energy,forces,stress,ierr)
   if (ierr /= MLIP_OK) stop "mlip_compute failed"
 
-  write(stdout,'(A,F16.8,A)') "  Energy          = ",energy," eV"
-  write(stdout,'(A,3F12.6)') "  Forces[atom 1]  = ",forces(:,1)
-  write(stdout,'(A,3F12.6)') "  Stress diagonal = ", &
+  write (stdout,'(A,F16.8,A)') "  Energy          = ",energy," eV"
+  write (stdout,'(A,3F12.6)') "  Forces[atom 1]  = ",forces(:,1)
+  write (stdout,'(A,3F12.6)') "  Stress diagonal = ", &
     stress(1,1),stress(2,2),stress(3,3)
 
   call mlip_finalize(1,ierr)
-  write(stdout,*) "Instance 1 finalized."
+  write (stdout,*) "Instance 1 finalized."
 
   ! ════════════════════════════════════════════════════════════════════════════
   ! Demo 2: multiple parallel instances (OpenMP)
   ! ════════════════════════════════════════════════════════════════════════════
-  write(stdout,*)
-  write(stdout,*) "=== Demo 2: parallel instances (OpenMP) ==="
+  write (stdout,*)
+  write (stdout,*) "=== Demo 2: parallel instances (OpenMP) ==="
 
+  pid = get_pid()
+  write (stdout,*) "Process PID:",pid
+
+  !> NOTE we are using the PID to assign communication channels in this example
   do i = 1,NINSTANCES
-    call build_server_cmd(backend_name,model_arg,BASE_PORT+i, &
+
+    call build_server_cmd(backend_name,model_arg,pid+i, &
                           lj_epsilon,lj_sigma,lj_cutoff,server_cmd)
-    call mlip_init(i,BASE_PORT+i,trim(server_cmd),TIMEOUT_SEC,ierr)
+    call mlip_init(i,pid+i,trim(server_cmd),TIMEOUT_SEC,ierr)
+
     if (ierr /= MLIP_OK) then
-      write(stdout,'(A,I0)') "mlip_init failed for instance ",i; stop
+      write (stdout,'(A,I0)') "mlip_init failed for instance ",i; stop
     end if
   end do
 
@@ -156,14 +165,14 @@ program example_usage
                       energy,forces,stress,ierr)
     if (ierr == MLIP_OK) then
       !$omp critical
-      write(stdout,'(A,I0,A,F14.6,A)') "  Thread ",iid,"  energy = ",energy," eV"
+      write (stdout,'(A,I0,A,F14.6,A)') "  Thread ",iid,"  energy = ",energy," eV"
       !$omp end critical
     end if
   end do
   !$omp end parallel do
 
   call mlip_finalize_all(ierr)
-  write(stdout,*) "All instances finalized."
+  write (stdout,*) "All instances finalized."
 
 contains
 

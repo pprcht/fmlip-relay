@@ -45,9 +45,7 @@ else
   )
 endif
 
-# Static builds embed the OpenMP runtime via link flags set in config/meson.build;
-# for shared/dynamic builds we pass the dep object explicitly.
-_omp_link_dep = (omp_dep.found() and not static_build) ? [omp_dep] : []
+_omp_link_dep = omp_dep.found() ? [omp_dep] : []
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Sources

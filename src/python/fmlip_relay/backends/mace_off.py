@@ -26,13 +26,13 @@ Available model sizes:
 
 from __future__ import annotations
 
-from ._mace_base import _MACEComputeMixin
+from ._ase_base import _ASEComputeMixin
 
 _KNOWN_MODELS = ("small", "medium", "large")
 _DEFAULT_MODEL = "medium"
 
 
-class MACEOFFBackend(_MACEComputeMixin):
+class MACEOFFBackend(_ASEComputeMixin):
     """
     Wraps ``mace.calculators.mace_off`` organic foundation model calculator.
 

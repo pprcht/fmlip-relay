@@ -1,8 +1,9 @@
 """
-fmlip_relay.backends._mace_base
+fmlip_relay.backends._ase_base
 ------------------------------
-Internal mixin that provides the shared ASE Atoms → energy/forces/stress
-evaluation logic used by all MACE backends.
+Generic mixin that implements ``compute()`` on top of any ASE calculator
+stored in ``self._calc``.  Subclasses only need to construct ``self._calc``
+in ``__init__``; everything else is handled here.
 
 Not part of the public API.
 """
@@ -13,7 +14,7 @@ import numpy as np
 from .base import BackendBase
 
 
-class _MACEComputeMixin(BackendBase):
+class _ASEComputeMixin(BackendBase):
     """
     Mixin that implements ``compute()`` on top of a stored ASE calculator
     ``self._calc``.  Subclasses only need to construct ``self._calc`` in
@@ -39,7 +40,7 @@ class _MACEComputeMixin(BackendBase):
             cell=cell,
             pbc=pbc,
         )
-        atoms.info["charge"] = charge 
+        atoms.info["charge"] = charge
         atoms.info["spin"] = spin
         atoms.calc = self._calc
 

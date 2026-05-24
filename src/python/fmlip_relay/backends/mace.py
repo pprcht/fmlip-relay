@@ -15,10 +15,10 @@ Usage (via CLI):
 
 from __future__ import annotations
 
-from ._mace_base import _MACEComputeMixin
+from ._ase_base import _ASEComputeMixin
 
 
-class MACEBackend(_MACEComputeMixin):
+class MACEBackend(_ASEComputeMixin):
     """
     Wraps ``mace.calculators.MACECalculator`` for a custom-trained model.
 

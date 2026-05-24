@@ -30,7 +30,7 @@ See https://github.com/ACEsuit/mace for the latest releases.
 
 from __future__ import annotations
 
-from ._mace_base import _MACEComputeMixin
+from ._ase_base import _ASEComputeMixin
 
 # Kept here so the CLI can show them in help text without importing torch
 _KNOWN_MODELS = (
@@ -44,7 +44,7 @@ _KNOWN_MODELS = (
 _DEFAULT_MODEL = "medium-mpa-0"
 
 
-class MACEMPBackend(_MACEComputeMixin):
+class MACEMPBackend(_ASEComputeMixin):
     """
     Wraps ``mace.calculators.mace_mp`` foundation model calculator.
 

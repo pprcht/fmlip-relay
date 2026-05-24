@@ -155,7 +155,7 @@ contains
     ! ── spawn process ────────────────────────────────────────────────────────
     pid_c = spawn_process_c(cmd_c,stdout_fd_c)
     if (pid_c < 0) then
-      write (stdout,*) "mlip_init: failed to spawn process"; return
+      write (stdout,'(A,I0,A)') "[mlip_init] instance ",iid,": failed to spawn process"; return
     end if
     instances(iid)%proc_pid = int(pid_c)
     instances(iid)%stdout_fd = int(stdout_fd_c)
@@ -164,7 +164,7 @@ contains
     ! ── wait for "READY" on stdout ────────────────────────────────────────────
     rc = wait_for_line_c(stdout_fd_c,c_str("READY"),int(timeout_sec,c_int))
     if (rc /= 0) then
-      write (stdout,*) "mlip_init: timeout waiting for READY signal"
+      write (stdout,'(A,I0,A)') "[mlip_init] instance ",iid,": timeout waiting for READY signal"
       call kill_process_c(pid_c)
       return
     end if
@@ -181,12 +181,12 @@ contains
       end if
     end do
     if (instances(iid)%sock_fd < 0) then
-      write (stdout,*) "mlip_init: failed to connect to server"; return
+      write (stdout,'(A,I0,A)') "[mlip_init] instance ",iid,": failed to connect to server"; return
     end if
 
     instances(iid)%active = .true.
     ierr = MLIP_OK
-    write (stdout,'(A,I0,A,I0)') "mlip_init: instance ",iid," ready on port ",port
+    write (stdout,'(A,I0,A,I0)') "[mlip_init] instance ",iid,": ready on port ",port
   end subroutine mlip_init
 
   ! ════════════════════════════════════════════════════════════════════════════
@@ -325,7 +325,7 @@ contains
       call kill_process_c(int(instances(iid)%proc_pid,c_int))
 
     instances(iid) = mlip_instance_t()   ! reset to default
-    write (stdout,'(A,I0)') "mlip_finalize: instance ",iid," shut down"
+    write (stdout,'(A,I0,A)') "[mlip_finalize] instance ",iid,": shut down"
     ierr = MLIP_OK
   end subroutine mlip_finalize
 

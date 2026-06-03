@@ -64,6 +64,17 @@ def _probe_mace() -> tuple[bool, str]:
         return True, "mace (version unknown)"
 
 
+def _probe_fairchem() -> tuple[bool, str]:
+    try:
+        importlib.import_module("fairchem.core")
+        ver = importlib.metadata.version("fairchem-core")
+        return True, f"fairchem-core {ver}"
+    except ImportError as e:
+        return False, str(e)
+    except importlib.metadata.PackageNotFoundError:
+        return True, "fairchem (version unknown)"
+
+
 def _probe_ase() -> tuple[bool, str]:
     try:
         import ase
@@ -102,6 +113,7 @@ _BACKENDS = [
     ("mace",     "fmlip_relay.backends.mace",    "MACEBackend",   "Custom MACE model from file",       None),
     ("mace_mp",  "fmlip_relay.backends.mace_mp", "MACEMPBackend", "MACE-MP foundation (89 elements)",  None),
     ("mace_off", "fmlip_relay.backends.mace_off","MACEOFFBackend","MACE-OFF foundation (organic)",      None),
+    ("uma",      "fmlip_relay.backends.uma",     "UMABackend",    "UMA universal model (fairchem)",    None),
 ]
 
 
@@ -124,11 +136,14 @@ def run_check() -> int:
     print(f"\n{_BOLD}ML dependencies{_RESET}")
     torch_ok,      torch_info      = _probe_torch()
     mace_ok,       mace_info       = _probe_mace()
+    fairchem_ok,   fairchem_info   = _probe_fairchem()
     ase_ok,        ase_info        = _probe_ase()
     dispersion_ok, dispersion_info = _probe_dispersion()
 
     _print_row("torch",      torch_ok,      torch_info)
     _print_row("mace-torch", mace_ok,       mace_info)
+    _print_row("fairchem",   fairchem_ok,   fairchem_info,
+               note="needed for the uma backend")
     _print_row("ase",        ase_ok,        ase_info)
     _print_row("torch-dftd", dispersion_ok, dispersion_info,
                note="optional — needed for --dispersion with mace_mp")
@@ -150,6 +165,10 @@ def run_check() -> int:
     if not (torch_ok and mace_ok and ase_ok):
         print(f"{_YELLOW}MACE backends unavailable. "
               f"Install with:  pip install \"fmlip-relay[mace]\"{_RESET}")
+    if not (torch_ok and fairchem_ok and ase_ok):
+        print(f"{_YELLOW}UMA backend unavailable. "
+              f"Install with:  pip install \"fmlip-relay[uma]\"  "
+              f"(then 'huggingface-cli login' for gated checkpoints){_RESET}")
     if not dispersion_ok:
         print(f"{_YELLOW}D3 dispersion unavailable. "
               f"Install with:  pip install torch-dftd{_RESET}")

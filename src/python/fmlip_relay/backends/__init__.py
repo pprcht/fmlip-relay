@@ -34,6 +34,12 @@ def _register_optional() -> None:
     except ImportError:
         pass
 
+    try:
+        from .uma import UMABackend
+        _REGISTRY["uma"] = UMABackend
+    except ImportError:
+        pass
+
 _register_optional()
 
 

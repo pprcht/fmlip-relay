@@ -17,6 +17,10 @@ Usage
     fmlip-relay-server --port 54321 --backend mace_off
     fmlip-relay-server --port 54321 --backend mace_off --mace-model small
 
+    # UMA universal model (Meta FAIR / fairchem) — pick a task head
+    fmlip-relay-server --port 54321 --backend uma --uma-task omol
+    fmlip-relay-server --port 54321 --backend uma --uma-model uma-m-1 --uma-task omat
+
     # Lennard-Jones
     fmlip-relay-server --port 54321 --backend lj --lj-epsilon 0.0104
 
@@ -37,6 +41,8 @@ import sys
 from .backends import get_backend_class
 from .backends.mace_mp  import _KNOWN_MODELS as _MACE_MP_MODELS,  _DEFAULT_MODEL as _MACE_MP_DEFAULT
 from .backends.mace_off import _KNOWN_MODELS as _MACE_OFF_MODELS, _DEFAULT_MODEL as _MACE_OFF_DEFAULT
+from .backends.uma      import (_KNOWN_MODELS as _UMA_MODELS, _DEFAULT_MODEL as _UMA_DEFAULT,
+                                _KNOWN_TASKS  as _UMA_TASKS,  _DEFAULT_TASK  as _UMA_TASK_DEFAULT)
 from . import server
 from . import test_mode
 
@@ -53,7 +59,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="TCP port to listen on (loopback only). "
                         "Required unless --test is used.")
     p.add_argument("--backend", type=str, required=True,
-                   help="Backend name: mace | mace_mp | mace_off | lj | dummy")
+                   help="Backend name: mace | mace_mp | mace_off | uma | lj | dummy")
 
     # ── test mode ─────────────────────────────────────────────────────────────
     p.add_argument("--test", type=str, default=None, metavar="GEOMETRY",
@@ -102,6 +108,22 @@ def _build_parser() -> argparse.ArgumentParser:
     grp_mp.add_argument("--dispersion", action="store_true", default=False,
                         help="Add D3 dispersion correction (mace_mp only; "
                              "requires torch-dftd)")
+
+    # ── backend: uma ─────────────────────────────────────────────────────────
+    grp_uma = p.add_argument_group(
+        "UMA options  (--backend uma)  — Meta FAIR universal model (fairchem)"
+    )
+    grp_uma.add_argument(
+        "--uma-model", type=str, default=None, metavar="MODEL",
+        help=(f"UMA checkpoint. Default: '{_UMA_DEFAULT}', options: "
+              f"{', '.join(_UMA_MODELS)}.")
+    )
+    grp_uma.add_argument(
+        "--uma-task", type=str, default=None, metavar="TASK",
+        choices=list(_UMA_TASKS),
+        help=(f"Task / domain head. Default: '{_UMA_TASK_DEFAULT}', options: "
+              f"{', '.join(_UMA_TASKS)}.")
+    )
 
     # ── backend: lj ──────────────────────────────────────────────────────────
     grp_lj = p.add_argument_group("Lennard-Jones options  (--backend lj)")
@@ -155,6 +177,13 @@ def _build_backend(args: argparse.Namespace):
             model  = args.mace_model or _MACE_OFF_DEFAULT,
             device = args.device,
             dtype  = args.dtype or "float32",
+        )
+
+    elif backend == "uma":
+        kwargs = dict(
+            model  = args.uma_model or _UMA_DEFAULT,
+            task   = args.uma_task  or _UMA_TASK_DEFAULT,
+            device = args.device,
         )
 
     elif backend == "lj":

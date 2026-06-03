@@ -41,6 +41,11 @@ pip install .
 # With MACE support
 pip install ".[mace]"
 
+# With UMA support (Meta FAIR / fairchem)
+pip install ".[uma]"
+# UMA checkpoints are gated on the Hugging Face Hub — authenticate once:
+huggingface-cli login
+
 # Development install (includes pytest)
 pip install -e ".[dev]"
 ```
@@ -77,6 +82,10 @@ fmlip-relay-server --port 54321 --backend lj --lj-epsilon 0.0104 --lj-sigma 3.40
 # MACE backend
 fmlip-relay-server --port 54321 --backend mace --model /path/to/model.model \
     --device cpu --dtype float64
+
+# UMA backend (Meta FAIR / fairchem) — choose a task head
+fmlip-relay-server --port 54321 --backend uma --uma-task omol --device cuda
+fmlip-relay-server --port 54321 --backend uma --uma-model uma-m-1 --uma-task omat
 ```
 
 ### 2. Build and run the Fortran example
@@ -131,7 +140,21 @@ For molecular clusters (no PBC), pass `pbc = [0, 0, 0]` and `compute_stress = 0`
 |---------|----------|------------|-------|
 | Dummy   | `dummy`  | —          | Random numbers; validates plumbing without a model |
 | Lennard-Jones | `lj` | — | Force-shifted cutoff; PBC via minimum-image; Argon defaults |
-| MACE    | `mace`   | `mace-torch`, `ase` | Requires `pip install ".[mace]"` |
+| MACE    | `mace`   | `mace-torch`, `ase` | Custom-trained `.model` file; requires `pip install ".[mace]"` |
+| MACE-MP | `mace_mp`| `mace-torch`, `ase` | Materials Project foundation model (89 elements) |
+| MACE-OFF| `mace_off`| `mace-torch`, `ase` | Organic foundation force field (10 elements) |
+| UMA     | `uma`    | `fairchem-core`, `ase` | Meta FAIR universal model; multi-task (`--uma-task omol\|omat\|omc\|oc20\|odac`); gated HF checkpoints; `pip install ".[uma]"` |
+
+### UMA parameters
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--uma-model` | `uma-s-1p1` | Checkpoint: `uma-s-1`, `uma-s-1p1`, `uma-m-1` |
+| `--uma-task`  | `omol`     | Domain head: `omol`, `omat`, `omc`, `oc20`, `odac` |
+| `--device`    | `cpu`      | PyTorch device; UMA runs best on `cuda` |
+
+The `omol` task uses the total charge and spin multiplicity forwarded through
+the relay protocol (`atoms.info["charge"]` / `atoms.info["spin"]`).
 
 ### Lennard-Jones parameters
 

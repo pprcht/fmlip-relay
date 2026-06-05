@@ -40,8 +40,10 @@ class _ASEComputeMixin(BackendBase):
             cell=cell,
             pbc=pbc,
         )
+        # Spin is the multiplicity (2S+1), which is >= 1; a stray 0 (e.g. an
+        # uninitialised caller default) collapses to the ground-state singlet.
         atoms.info["charge"] = charge
-        atoms.info["spin"] = spin
+        atoms.info["spin"] = spin if spin >= 1 else 1
         atoms.calc = self._calc
 
         energy = float(atoms.get_potential_energy())

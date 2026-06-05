@@ -49,6 +49,8 @@ class MACEBackend(_ASEComputeMixin):
             default_dtype=dtype,
         )
         self._model_path = model_path
+        self._device     = device
+        self._dtype      = dtype
 
     @property
     def name(self) -> str:

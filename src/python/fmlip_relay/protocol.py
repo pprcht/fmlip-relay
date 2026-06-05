@@ -15,8 +15,8 @@ Request layout (Fortran → Python)
   float64 × 9    cell        [row-major,  Angstrom]
   int32  × 3     pbc         (1 = periodic)
   int32          compute_stress (0/1)
-  int32          molecular charge
-  int32          molecular spin
+  int32          total charge          (neutral default 0)
+  int32          spin multiplicity 2S+1 (ground-state singlet default 1)
 
 Response layout (Python → Fortran)
 ────────────────────────────────────

@@ -32,12 +32,12 @@ Install requirements:
 Usage (via CLI):
     fmlip-relay-server --port 54321 --backend uma --uma-task omol
     fmlip-relay-server --port 54321 --backend uma \\
-        --uma-model uma-s-1p1 \\
+        --uma-model uma-s-1p2 \\
         --uma-task omat \\
         [--device cpu|cuda|cuda:0]
 
 Available model variants (as of fairchem-core 2.x):
-    uma-s-1, uma-s-1p1 (default), uma-m-1
+    uma-s-1, uma-s-1p1, uma-s-1p2 (default), uma-m-1
 
 See https://github.com/facebookresearch/fairchem for the latest releases.
 """
@@ -47,8 +47,8 @@ from __future__ import annotations
 from ._ase_base import _ASEComputeMixin
 
 # Kept here so the CLI can show them in help text without importing torch
-_KNOWN_MODELS = ("uma-s-1", "uma-s-1p1", "uma-m-1")
-_DEFAULT_MODEL = "uma-s-1p1"
+_KNOWN_MODELS = ("uma-s-1", "uma-s-1p1", "uma-s-1p2", "uma-m-1")
+_DEFAULT_MODEL = "uma-s-1p2"
 
 _KNOWN_TASKS = ("omol", "omat", "omc", "oc20", "odac")
 _DEFAULT_TASK = "omol"
@@ -61,8 +61,8 @@ class UMABackend(_ASEComputeMixin):
     Parameters
     ----------
     model : str
-        UMA checkpoint name, e.g. ``"uma-s-1p1"`` (default), ``"uma-s-1"``,
-        ``"uma-m-1"``.  Resolved against the Hugging Face Hub.
+        UMA checkpoint name, e.g. ``"uma-s-1p2"`` (default), ``"uma-s-1p1"``,
+        ``"uma-s-1"``, ``"uma-m-1"``.  Resolved against the Hugging Face Hub.
     task : str
         Task / domain head to evaluate: one of ``omol``, ``omat``, ``omc``,
         ``oc20``, ``odac``.  Defaults to ``"omol"`` (molecules; honours the
@@ -93,8 +93,10 @@ class UMABackend(_ASEComputeMixin):
         predictor = pretrained_mlip.get_predict_unit(model, device=device)
         self._calc = FAIRChemCalculator(predictor, task_name=task)
 
-        self._model = model
-        self._task  = task
+        self._model  = model
+        self._task   = task
+        self._device = device
+        self._dtype  = "float32"   # fairchem runs UMA inference in float32
 
     @property
     def name(self) -> str:

@@ -42,7 +42,7 @@ _SYMBOL_TO_Z: dict[str, int] = {
 
 def read_geometry(
     path: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int | None, int | None]:
     """
     Read a molecular geometry file and return arrays suitable for
     ``BackendBase.compute()``.
@@ -61,16 +61,23 @@ def read_geometry(
     positions      : np.ndarray  shape (N, 3) float64  [Angstrom]
     cell           : np.ndarray  shape (3, 3) float64  [Angstrom]
     pbc            : np.ndarray  shape (3,)   bool
+    charge         : int | None  total charge if present in the file, else None
+    spin           : int | None  spin multiplicity (2S+1) if present, else None
     """
     # ── ASE path (preferred) ──────────────────────────────────────────────────
     try:
         import ase.io
         atoms = ase.io.read(path)
+        # extended-XYZ and similar formats may carry these in atoms.info
+        charge = atoms.info.get("charge")
+        spin   = atoms.info.get("spin", atoms.info.get("multiplicity"))
         return (
             atoms.get_atomic_numbers().astype(np.int32),
             atoms.get_positions().astype(np.float64),
             np.array(atoms.get_cell(), dtype=np.float64),
             np.array(atoms.get_pbc(), dtype=bool),
+            None if charge is None else int(charge),
+            None if spin   is None else int(spin),
         )
     except ImportError:
         pass  # ASE not available — fall through to plain-XYZ parser
@@ -109,10 +116,13 @@ def read_geometry(
         np.array(coords,  dtype=np.float64),
         np.zeros((3, 3),  dtype=np.float64),
         np.zeros(3,       dtype=bool),
+        None,   # plain-XYZ carries no charge
+        None,   # plain-XYZ carries no spin
     )
 
 
-def run_test(backend, geometry_path: str) -> int:
+def run_test(backend, geometry_path: str,
+             charge: int | None = None, spin: int | None = None) -> int:
     """
     Load *geometry_path*, call ``backend.compute()`` once, print a summary,
     and return an exit code (0 = success, 1 = error).
@@ -121,19 +131,33 @@ def run_test(backend, geometry_path: str) -> int:
     ----------
     backend       : BackendBase instance (already initialised)
     geometry_path : str  path to the input geometry file
+    charge        : int | None  total charge override; if None, the value from
+                    the geometry file is used, falling back to 0 (neutral).
+    spin          : int | None  spin multiplicity (2S+1) override; if None, the
+                    value from the geometry file is used, falling back to 1
+                    (ground-state singlet).
     """
     log = logging.getLogger(__name__)
 
     # ── read geometry ─────────────────────────────────────────────────────────
     log.info("Reading geometry from '%s' …", geometry_path)
     try:
-        atomic_numbers, positions, cell, pbc = read_geometry(geometry_path)
+        atomic_numbers, positions, cell, pbc, file_charge, file_spin = \
+            read_geometry(geometry_path)
     except Exception as exc:
         print(f"\n[ERROR] Could not read geometry: {exc}", file=sys.stderr)
         return 1
 
     natoms = len(atomic_numbers)
     log.info("Geometry loaded: %d atoms, pbc=%s", natoms, pbc.tolist())
+
+    # ── resolve charge / spin: CLI override > geometry file > default ──────────
+    used_charge, charge_src = _resolve(charge, file_charge, 0)
+    used_spin,   spin_src   = _resolve(spin,   file_spin,   1)
+    if used_spin < 1:
+        used_spin = 1   # multiplicity 2S+1 is >= 1; clamp stray 0
+    log.info("Using charge=%d (%s), spin=%d (%s)",
+             used_charge, charge_src, used_spin, spin_src)
 
     # ── single-point evaluation ───────────────────────────────────────────────
     compute_stress = bool(np.any(pbc))
@@ -144,7 +168,7 @@ def run_test(backend, geometry_path: str) -> int:
         energy, forces, stress = backend.compute(
             atomic_numbers, positions, cell, pbc,
             compute_stress=compute_stress,
-            charge=0, spin=1,
+            charge=used_charge, spin=used_spin,
         )
     except Exception as exc:
         print(f"\n[ERROR] Backend computation failed: {exc}", file=sys.stderr)
@@ -157,8 +181,18 @@ def run_test(backend, geometry_path: str) -> int:
         geometry_path, backend, natoms, pbc, cell,
         energy, forces, stress, compute_stress, elapsed,
         atomic_numbers,
+        used_charge, charge_src, used_spin, spin_src,
     )
     return 0
+
+
+def _resolve(override, from_file, default) -> tuple[int, str]:
+    """Pick a value by precedence (CLI override > file > default) and label its source."""
+    if override is not None:
+        return override, "cli"
+    if from_file is not None:
+        return from_file, "file"
+    return default, "default"
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────
@@ -175,6 +209,10 @@ def _print_summary(
     compute_stress: bool,
     elapsed: float,
     atomic_numbers: np.ndarray,
+    charge: int,
+    charge_src: str,
+    spin: int,
+    spin_src: str,
 ) -> None:
     # Element symbols — ASE if available, raw Z otherwise
     try:
@@ -191,28 +229,36 @@ def _print_summary(
     print(f"\n{sep}")
     print(f"  fmlip-relay  single-point test")
     print(sep)
-    print(f"  File        : {os.path.basename(geometry_path)}")
-    print(f"  Backend     : {backend.name}")
-    print(f"  Atoms       : {natoms}")
-    print(f"  PBC         : {pbc.tolist()}")
+    print(f"  File         : {os.path.basename(geometry_path)}")
+    print(f"  Backend      : {backend.name}")
+    device    = backend.device
+    precision = backend.precision
+    if device is not None:
+        print(f"  Device       : {device}")
+    if precision is not None:
+        print(f"  Precision    : {precision}")
+    print(f"  Atoms        : {natoms}")
+    print(f"  Charge       : {charge:+d}  ({charge_src})")
+    print(f"  Multiplicity : {spin}  (2S+1, {spin_src})")
+    print(f"  PBC          : {pbc.tolist()}")
     if compute_stress:
         cell_abc = np.linalg.norm(cell, axis=1)
-        print(f"  Cell (|a|)  : {cell_abc[0]:.4f}  {cell_abc[1]:.4f}  {cell_abc[2]:.4f}  Å")
+        print(f"  Cell (|a|)   : {cell_abc[0]:.4f}  {cell_abc[1]:.4f}  {cell_abc[2]:.4f}  Å")
     print(sep)
-    print(f"  Energy      : {energy:+.6f}  eV        ({energy/natoms:+.6f} eV/atom)")
-    print(f"  |F| max     : {fmax:.6f}  eV/Å")
-    print(f"  |F| mean    : {fmean:.6f}  eV/Å")
-    print(f"  |F| rms     : {frms:.6f}  eV/Å")
+    print(f"  Energy       : {energy:+.6f}  eV        ({energy/natoms:+.6f} eV/atom)")
+    print(f"  |F| max      : {fmax:.6f}  eV/Å")
+    print(f"  |F| mean     : {fmean:.6f}  eV/Å")
+    print(f"  |F| rms      : {frms:.6f}  eV/Å")
     if compute_stress:
-        print(f"  Stress (eV/Å³):")
+        print(f"  Stress (eV/Å³) :")
         for row in stress:
             print(f"    {row[0]:+.4e}  {row[1]:+.4e}  {row[2]:+.4e}")
     print(sep)
-    print(f"  Wall time   : {elapsed*1e3:.1f} ms")
+    print(f"  Wall time    : {elapsed*1e3:.1f} ms")
     print(sep)
 
     # Per-atom force table for small structures or when DEBUG logging is active
-    if natoms <= 20 or logging.getLogger().isEnabledFor(logging.DEBUG):
+    if natoms <= 20 or logging.getLogger("fmlip_relay").isEnabledFor(logging.DEBUG):
         print(f"\n  {'#':>4}  {'sym':>3}  {'Fx':>12}  {'Fy':>12}  {'Fz':>12}  |F|")
         for i, (sym, f) in enumerate(zip(symbols, forces)):
             fnorm = float(np.linalg.norm(f))

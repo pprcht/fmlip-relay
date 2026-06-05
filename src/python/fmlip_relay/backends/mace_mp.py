@@ -82,6 +82,8 @@ class MACEMPBackend(_ASEComputeMixin):
         )
         self._model      = model
         self._dispersion = dispersion
+        self._device     = device
+        self._dtype      = dtype
 
     @property
     def name(self) -> str:

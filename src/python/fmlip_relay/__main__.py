@@ -62,10 +62,21 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Backend name: mace | mace_mp | mace_off | uma | lj | dummy")
 
     # ── test mode ─────────────────────────────────────────────────────────────
-    p.add_argument("--test", type=str, default=None, metavar="GEOMETRY",
-                   help="Run a single-point calculation on the given geometry "
-                        "file (XYZ / extended-XYZ), print a summary, and exit. "
-                        "--port is not required in this mode.")
+    grp_test = p.add_argument_group("Single-point test options  (--test)")
+    grp_test.add_argument("--test", type=str, default=None, metavar="GEOMETRY",
+                          help="Run a single-point calculation on the given geometry "
+                               "file (XYZ / extended-XYZ), print a summary, and exit. "
+                               "--port is not required in this mode.")
+    grp_test.add_argument("--charge", type=int, default=None, metavar="Q",
+                          help="Total charge for the --test evaluation. "
+                               "Default: value from the geometry file if present, "
+                               "else 0 (neutral). Used by charge-aware backends "
+                               "(e.g. UMA omol).")
+    grp_test.add_argument("--spin", type=int, default=None, metavar="M",
+                          help="Spin multiplicity 2S+1 for the --test evaluation. "
+                               "Default: value from the geometry file if present, "
+                               "else 1 (ground-state singlet). Used by spin-aware "
+                               "backends (e.g. UMA omol).")
 
     # ── logging ───────────────────────────────────────────────────────────────
     p.add_argument("--log",      type=str, default=None,
@@ -81,16 +92,22 @@ def _build_parser() -> argparse.ArgumentParser:
     grp_mace.add_argument("--model", type=str, default=None,
                           help="Path to .model file (required for mace backend)")
 
-    # ── shared MACE options ───────────────────────────────────────────────────
+    # ── shared neural-network options ─────────────────────────────────────────
+    grp_nn = p.add_argument_group(
+        "Shared neural-network options  (mace | mace_mp | mace_off | uma)"
+    )
+    grp_nn.add_argument("--device", type=str, default="cpu",
+                        help="PyTorch device string, e.g. cpu | cuda | cuda:0")
+
+    # ── shared MACE precision option ──────────────────────────────────────────
     grp_mace_shared = p.add_argument_group(
         "Shared MACE options  (mace | mace_mp | mace_off)"
     )
-    grp_mace_shared.add_argument("--device", type=str, default="cpu",
-                                 help="PyTorch device string")
     grp_mace_shared.add_argument("--dtype",  type=str, default=None,
                                  choices=["float32", "float64"],
                                  help="Floating-point precision "
-                                      "(default: float64 for mace, float32 for foundation models)")
+                                      "(default: float64 for mace, float32 for foundation models). "
+                                      "UMA precision is fixed by fairchem (float32).")
 
     # ── backend: mace_mp ─────────────────────────────────────────────────────
     grp_mp = p.add_argument_group(
@@ -141,11 +158,16 @@ def _configure_logging(loglevel: str, logfile: str | None) -> None:
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     if logfile:
         handlers.append(logging.FileHandler(logfile))
+    # Keep the root logger at WARNING so chatty third-party libraries (httpx,
+    # fairchem, urllib3, huggingface_hub, …) don't spam at INFO during model
+    # download/load.  Only our own package logs at the requested level; its
+    # records still reach the root handlers via propagation.
     logging.basicConfig(
-        level=getattr(logging, loglevel),
+        level=logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=handlers,
     )
+    logging.getLogger("fmlip_relay").setLevel(getattr(logging, loglevel))
 
 
 def _build_backend(args: argparse.Namespace):
@@ -217,7 +239,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # ── test mode ─────────────────────────────────────────────────────────────
     if args.test is not None:
-        sys.exit(test_mode.run_test(backend, args.test))
+        sys.exit(test_mode.run_test(backend, args.test,
+                                    charge=args.charge, spin=args.spin))
 
     # ── server mode ───────────────────────────────────────────────────────────
     server.run(args.port, backend)

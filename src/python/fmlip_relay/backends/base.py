@@ -40,8 +40,9 @@ class BackendBase(ABC):
         cell           : (3, 3) float64 – lattice row vectors, Angstrom
         pbc            : (3,)   bool    – periodic boundary flags
         compute_stress : bool           – whether to compute the stress tensor
-        charge         : int32          - molecular charge
-        spin           : int32          - molecular spin information
+        charge         : int32          - total charge (neutral = 0)
+        spin           : int32          - spin multiplicity 2S+1
+                                          (ground-state singlet = 1)
 
         Returns
         -------
@@ -55,3 +56,13 @@ class BackendBase(ABC):
     def name(self) -> str:
         """Human-readable backend name for log messages."""
         return type(self).__name__
+
+    @property
+    def device(self) -> str | None:
+        """Compute device (e.g. ``"cpu"``, ``"cuda:0"``), or None if N/A."""
+        return getattr(self, "_device", None)
+
+    @property
+    def precision(self) -> str | None:
+        """Floating-point precision (e.g. ``"float32"``), or None if N/A."""
+        return getattr(self, "_dtype", None)

@@ -14,6 +14,9 @@
 !>   mlip_compute   (iid, natoms, positions, cell, pbc, compute_stress, charge, spin,
 !>                   energy, forces, stress, ierr)
 !>       Send one COMPUTE request, receive energy/forces/stress.
+!>       charge (total charge) and spin (multiplicity 2S+1) are optional and
+!>       default to a neutral, ground-state singlet (charge=0, spin=1); they
+!>       are only used by charge/spin-aware backends (e.g. UMA omol).
 !>
 !>   mlip_ping      (iid, ierr)
 !>       Lightweight round-trip check.
@@ -202,8 +205,8 @@ contains
     real(wp),intent(in)  :: cell(3,3)               !< row vectors
     integer,intent(in)   :: pbc(3)                  !< 1=periodic, 0=not
     integer,intent(in)   :: compute_stress          !< 1 to request stress
-    integer,intent(in)   :: charge                  !< molecular charge
-    integer,intent(in)   :: spin                    !< molecular spin
+    integer,intent(in),optional :: charge           !< total molecular charge (default 0)
+    integer,intent(in),optional :: spin             !< spin multiplicity 2S+1 (default 1, ground state)
     real(wp),intent(out) :: energy
     real(wp),intent(out) :: forces(3,natoms)
     real(wp),intent(out) :: stress(3,3)
@@ -212,11 +215,19 @@ contains
     integer(c_int) :: hdr(2),pbc_c(3),stress_flag_c(1),status(1),rc
     integer(c_int) :: atomic_numbers_c(natoms),charge_c(1),spin_c(1)
     real(wp)       :: pos_buf(3*natoms),cell_buf(9),stress_buf(9),energy_buf(1)
+    integer        :: charge_l,spin_l
 
     ierr = MLIP_ERR
     energy = 0.0_wp
     forces = 0.0_wp
     stress = 0.0_wp
+
+    ! ── resolve optional charge/spin: neutral, ground-state singlet default ──
+    charge_l = 0
+    if (present(charge)) charge_l = charge
+    spin_l = 1
+    if (present(spin)) spin_l = spin
+    if (spin_l < 1) spin_l = 1   ! multiplicity 2S+1 is >= 1; clamp stray 0
 
     if (.not.instances(iid)%active) then
       write (stdout,'(A,I0)') "mlip_compute: instance not active, iid=",iid; return
@@ -228,8 +239,8 @@ contains
     pbc_c = int(pbc,c_int)
     atomic_numbers_c = int(atomic_numbers,c_int)
     stress_flag_c(1) = int(compute_stress,c_int)
-    charge_c(1) = int(charge,c_int)
-    spin_c(1) = int(spin,c_int)
+    charge_c(1) = int(charge_l,c_int)
+    spin_c(1) = int(spin_l,c_int)
 
     ! ── send header: msg_type, natoms ────────────────────────────────────────
     hdr(1) = int(MSG_COMPUTE,c_int)
@@ -254,7 +265,7 @@ contains
     ! ── send molecular charge (1 int32) ──────────────────────────────────────
     rc = sock_send_bytes(iid,charge_c,4); if (rc /= 0) return
 
-    ! ── send molecular spun (1 int32) ────────────────────────────────────────
+    ! ── send spin multiplicity (1 int32) ─────────────────────────────────────
     rc = sock_send_bytes(iid,spin_c,4); if (rc /= 0) return
 
     ! ── receive status (int32) ───────────────────────────────────────────────

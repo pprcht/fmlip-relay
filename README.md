@@ -149,7 +149,7 @@ For molecular clusters (no PBC), pass `pbc = [0, 0, 0]` and `compute_stress = 0`
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--uma-model` | `uma-s-1p1` | Checkpoint: `uma-s-1`, `uma-s-1p1`, `uma-m-1` |
+| `--uma-model` | `uma-s-1p2` | Checkpoint: `uma-s-1`, `uma-s-1p1`, `uma-s-1p2`, `uma-m-1` |
 | `--uma-task`  | `omol`     | Domain head: `omol`, `omat`, `omc`, `oc20`, `odac` |
 | `--device`    | `cpu`      | PyTorch device; UMA runs best on `cuda` |
 

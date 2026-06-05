@@ -117,6 +117,10 @@ program example_usage
   call mlip_ping(1,ierr)
   if (ierr == MLIP_OK) write (stdout,*) " PING OK"
 
+  ! charge=0, spin=1 (neutral, ground-state singlet). Both are optional and
+  ! default to exactly these values, so they may be omitted via keyword args:
+  !   call mlip_compute(1,NATOMS,...,pbc,1,energy=energy,forces=forces, &
+  !                     stress=stress,ierr=ierr)
   call mlip_compute(1,NATOMS,atomic_numbers,positions,cell,pbc,1,0,1, &
                     energy,forces,stress,ierr)
   if (ierr /= MLIP_OK) stop "mlip_compute failed"

@@ -69,6 +69,8 @@ class MACEOFFBackend(_ASEComputeMixin):
             default_dtype=dtype,
         )
         self._model  = model
+        self._device = device
+        self._dtype  = dtype
 
     @property
     def name(self) -> str:

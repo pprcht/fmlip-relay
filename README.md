@@ -50,6 +50,14 @@ huggingface-cli login
 pip install -e ".[dev]"
 ```
 
+> **Note:** The `[mace]` and `[uma]` extras pull in the upstream packages
+> (`mace-torch` / `fairchem-core`) with default settings, which may not match
+> your platform (CUDA version, PyTorch build, etc.). For a working ML setup,
+> especially GPU support, follow the official installation instructions on the
+> respective project repositories:
+> [MACE](https://github.com/ACEsuit/mace) and
+> [fairchem/UMA](https://github.com/facebookresearch/fairchem).
+
 ### Fortran/C library (CMake)
 
 ```bash

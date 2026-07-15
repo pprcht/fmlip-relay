@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from .backends import get_backend_class
@@ -98,6 +99,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     grp_nn.add_argument("--device", type=str, default="cpu",
                         help="PyTorch device string, e.g. cpu | cuda | cuda:0")
+    grp_nn.add_argument("--max-threads", type=int, default=None, metavar="N",
+                        help="Cap CPU threads this server may use for inference "
+                             "(sets OMP/MKL/BLAS thread env + torch.set_num_threads). "
+                             "Default: unset — inherit OMP_NUM_THREADS / all cores. "
+                             "Only meaningful on CPU.")
+    grp_nn.add_argument("--cpu-affinity", type=str, default=None, metavar="CPUS",
+                        help="Pin this server to a fixed set of CPU cores, e.g. "
+                             "'0-3' or '0,2,4' or '0-3,8'. Linux only. If "
+                             "--max-threads is not also given, the thread cap "
+                             "defaults to the number of pinned cores. Use this to "
+                             "run several servers on disjoint cores instead of "
+                             "letting them fight over all of them.")
 
     # ── shared MACE precision option ──────────────────────────────────────────
     grp_mace_shared = p.add_argument_group(
@@ -170,6 +183,59 @@ def _configure_logging(loglevel: str, logfile: str | None) -> None:
     logging.getLogger("fmlip_relay").setLevel(getattr(logging, loglevel))
 
 
+def _limit_threads(n: int) -> None:
+    """Cap the CPU thread pools used by torch / numpy / BLAS.
+
+    The OpenMP-style env vars must be set *before* torch (and its BLAS
+    backends) are first imported to size their pools; because every backend
+    imports torch lazily inside its ``__init__``, calling this just before
+    ``_build_backend`` is early enough.  ``torch.set_num_threads`` is also
+    called afterwards as a runtime safeguard.
+    """
+    if n < 1:
+        raise ValueError("--max-threads must be >= 1")
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
+                "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+                "VECLIB_MAXIMUM_THREADS"):
+        os.environ[var] = str(n)
+
+
+def _parse_cpu_list(spec: str) -> list[int]:
+    """Parse a CPU spec like ``'0-3,8,10-11'`` into a sorted list of ints."""
+    cpus: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo_s, hi_s = part.split("-", 1)
+            lo, hi = int(lo_s), int(hi_s)
+            if lo > hi:
+                raise ValueError(f"invalid CPU range '{part}' (start > end)")
+            cpus.update(range(lo, hi + 1))
+        else:
+            cpus.add(int(part))
+    if not cpus:
+        raise ValueError("--cpu-affinity is empty")
+    if min(cpus) < 0:
+        raise ValueError("CPU indices must be >= 0")
+    return sorted(cpus)
+
+
+def _set_affinity(cpus: list[int]) -> None:
+    """Pin the current process to the given CPU cores (Linux only)."""
+    if not hasattr(os, "sched_setaffinity"):
+        raise ValueError("--cpu-affinity is only supported on Linux")
+    ncpu = os.cpu_count() or 0
+    bad = [c for c in cpus if c >= ncpu]
+    if bad:
+        shown = ", ".join(map(str, bad[:8])) + (", …" if len(bad) > 8 else "")
+        raise ValueError(
+            f"CPU indices [{shown}] exceed available cores (system has {ncpu})"
+        )
+    os.sched_setaffinity(0, set(cpus))
+
+
 def _build_backend(args: argparse.Namespace):
     cls     = get_backend_class(args.backend)
     backend = args.backend.lower()
@@ -229,11 +295,43 @@ def main(argv: list[str] | None = None) -> None:
     if args.test is None and args.port is None:
         parser.error("--port is required when not using --test")
 
+    # ── pin CPU cores before torch is imported (via the backend) ──────────────
+    cpus = None
+    if args.cpu_affinity is not None:
+        try:
+            cpus = _parse_cpu_list(args.cpu_affinity)
+            _set_affinity(cpus)
+        except ValueError as exc:
+            parser.error(str(exc))
+        log.info("Pinned to CPU cores: %s.", ",".join(map(str, cpus)))
+
+    # ── cap CPU threads before torch is imported (via the backend) ────────────
+    # If cores were pinned but no explicit cap given, default the cap to the
+    # number of pinned cores so torch doesn't oversubscribe them.
+    thread_cap = args.max_threads
+    if thread_cap is None and cpus is not None:
+        thread_cap = len(cpus)
+    if thread_cap is not None:
+        try:
+            _limit_threads(thread_cap)
+        except ValueError as exc:
+            parser.error(str(exc))
+        log.info("Capping CPU threads to %d.", thread_cap)
+
     # ── build backend (shared by both modes) ──────────────────────────────────
     try:
         backend = _build_backend(args)
     except (KeyError, ValueError) as exc:
         parser.error(str(exc))
+
+    # torch is now imported (transitively via the backend); enforce the cap at
+    # the runtime level too, in case it was already imported elsewhere.
+    if thread_cap is not None:
+        try:
+            import torch
+            torch.set_num_threads(thread_cap)
+        except ImportError:
+            pass
 
     log.info("Backend '%s' loaded successfully.", backend.name)
 

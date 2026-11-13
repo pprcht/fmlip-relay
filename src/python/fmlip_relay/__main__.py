@@ -24,6 +24,16 @@ Usage
     # Lennard-Jones
     fmlip-relay-server --port 54321 --backend lj --lj-epsilon 0.0104
 
+    # Other model files: mace_polar | nequip | allegro | deepmd | schnet
+    fmlip-relay-server --port 54321 --backend nequip --model /path/to/model.nequip.pt2
+
+    # Any ASE calculator built by a script defining create_calculator()
+    fmlip-relay-server --port 54321 --backend custom --model ase_custom.py
+
+    # OpenMM force field (AMBER | GROMACS | CHARMM | OPENCG); --device picks the platform
+    fmlip-relay-server --port 54321 --backend openmm --device cuda \\
+        --omm-source AMBER --omm-coord system.inpcrd --omm-top system.prmtop
+
     # Dummy (no model required)
     fmlip-relay-server --port 54321 --backend dummy
 
@@ -62,7 +72,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         "pick a free port, announced as 'READY <port>'. "
                         "Required unless --test is used.")
     p.add_argument("--backend", type=str, required=True,
-                   help="Backend name: mace | mace_mp | mace_off | uma | lj | dummy")
+                   help="Backend name: mace | mace_mp | mace_off | uma | "
+                        "mace_polar | nequip | allegro | deepmd | schnet | "
+                        "openmm | custom | lj | dummy")
     p.add_argument("--exit-on-disconnect", action="store_true", default=False,
                    help="Shut the server down when the client disconnects "
                         "without QUIT (e.g. the Fortran parent crashed), "
@@ -94,17 +106,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── backend: mace (custom model file) ────────────────────────────────────
     grp_mace = p.add_argument_group(
-        "Custom MACE model options  (--backend mace)"
+        "Model file options  (mace | mace_polar | nequip | allegro | deepmd | "
+        "schnet | custom)"
     )
     grp_mace.add_argument("--model", type=str, default=None,
-                          help="Path to .model file (required for mace backend)")
+                          help="Path to the model file (required for mace, "
+                               "mace_polar, nequip, allegro, deepmd, schnet). "
+                               "For custom: the script defining "
+                               "create_calculator(), default ./ase_custom.py")
 
     # ── shared neural-network options ─────────────────────────────────────────
     grp_nn = p.add_argument_group(
-        "Shared neural-network options  (mace | mace_mp | mace_off | uma)"
+        "Shared neural-network options  (mace | mace_mp | mace_off | uma | "
+        "mace_polar | nequip | allegro | deepmd | schnet)"
     )
     grp_nn.add_argument("--device", type=str.lower, default="cpu",
-                        help="PyTorch device string, e.g. cpu | cuda | cuda:0")
+                        help="PyTorch device string, e.g. cpu | cuda | cuda:0. "
+                             "For openmm the platform: cpu | cuda | opencl | "
+                             "reference")
     grp_nn.add_argument("--e-to-ev", type=float, default=1.0, metavar="F",
                         help="eV per model energy unit, for models trained in "
                              "other units (ASE-based backends)")
@@ -126,12 +145,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── shared MACE precision option ──────────────────────────────────────────
     grp_mace_shared = p.add_argument_group(
-        "Shared MACE options  (mace | mace_mp | mace_off)"
+        "Shared precision option  (mace | mace_mp | mace_off | mace_polar | "
+        "deepmd | schnet)"
     )
     grp_mace_shared.add_argument("--dtype",  type=str, default=None,
                                  choices=["float32", "float64"],
                                  help="Floating-point precision "
-                                      "(default: float64 for mace, float32 for foundation models). "
+                                      "(default: float64 for model files, float32 for foundation models). "
                                       "UMA precision is fixed by fairchem (float32).")
 
     # ── backend: mace_mp ─────────────────────────────────────────────────────
@@ -175,6 +195,31 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Zero-crossing σ in Å")
     grp_lj.add_argument("--lj-cutoff",  type=float, default=8.50,
                         help="Cutoff radius in Å")
+
+    # ── backend: openmm ──────────────────────────────────────────────────────
+    grp_omm = p.add_argument_group(
+        "OpenMM options  (--backend openmm)  — classical force fields"
+    )
+    grp_omm.add_argument("--omm-source", type=str.upper, default=None,
+                         choices=["AMBER", "GROMACS", "CHARMM", "OPENCG"],
+                         help="Force-field input format")
+    grp_omm.add_argument("--omm-coord", type=str, default=None,
+                         help="Coordinate file (OPENCG: start/restart PDB)")
+    grp_omm.add_argument("--omm-top", type=str, default=None,
+                         help="Topology file: prmtop, top or psf "
+                              "(OPENCG: fixed reference PDB)")
+    grp_omm.add_argument("--omm-param", action="append", default=[],
+                         help="CHARMM parameter/topology/stream file (repeatable)")
+    grp_omm.add_argument("--omm-include-dir", type=str, default=None,
+                         help="GROMACS include directory")
+    grp_omm.add_argument("--omm-config", type=str, default="NOCONFIG",
+                         help="createSystem options, or the OpenCG model "
+                              "(.json/.yaml/.yml)")
+    grp_omm.add_argument("--omm-pbc", type=str.upper, default=None,
+                         choices=["PBC", "NOPBC"],
+                         help="Periodicity for --omm-prepare-only")
+    grp_omm.add_argument("--omm-prepare-only", action="store_true",
+                         help="Generate an OpenCG start PDB and exit")
 
     return p
 
@@ -313,7 +358,67 @@ def _build_backend(args: argparse.Namespace):
             r_cut   = args.lj_cutoff,
         )
 
+    elif backend in {"mace_polar", "deepmd", "schnet"}:
+        if not args.model:
+            raise ValueError(f"--model is required for the {backend} backend")
+        kwargs = dict(
+            model_path = args.model,
+            device     = args.device,
+            dtype      = args.dtype or "float64",
+        )
+        if backend == "schnet":
+            kwargs["l_to_ang"] = args.l_to_ang
+
+    elif backend in {"nequip", "allegro"}:
+        if not args.model:
+            raise ValueError(f"--model is required for the {backend} backend")
+        kwargs = dict(
+            model_path = args.model,
+            device     = args.device,
+        )
+
+    elif backend == "custom":
+        kwargs = dict(script_path=args.model)
+
+    elif backend == "openmm":
+        if not (args.omm_source and args.omm_coord and args.omm_top):
+            raise ValueError("--omm-source, --omm-coord and --omm-top are "
+                             "required for the openmm backend")
+        kwargs = dict(
+            source          = args.omm_source,
+            coord_path      = args.omm_coord,
+            topology_path   = args.omm_top,
+            config_path     = args.omm_config,
+            parameter_files = args.omm_param,
+            include_dir     = args.omm_include_dir,
+            platform_name   = args.device,
+        )
+
     return cls(**kwargs)
+
+
+def _prepare_opencg_pdb(args: argparse.Namespace, parser) -> None:
+    """``--omm-prepare-only``: write an OpenCG start PDB to stdout."""
+    from pathlib import Path
+    from .backends.openmm import load_config
+    from .backends.opencg import prepare_pdb
+
+    if args.backend.lower() != "openmm" or args.omm_source != "OPENCG":
+        parser.error("--omm-prepare-only requires --backend openmm "
+                     "--omm-source OPENCG")
+    if (not args.omm_top or not args.omm_coord or args.omm_pbc is None
+            or args.omm_config.upper() == "NOCONFIG"):
+        parser.error("--omm-prepare-only needs --omm-config, --omm-top, "
+                     "--omm-coord and --omm-pbc")
+
+    model = load_config(Path(args.omm_config).expanduser().resolve())
+    print(prepare_pdb(
+        model=model,
+        reference_path=args.omm_top,
+        coordinate_path=args.omm_coord,
+        platform_name=args.device,
+        periodic=(args.omm_pbc == "PBC"),
+    ))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -325,6 +430,10 @@ def main(argv: list[str] | None = None) -> None:
 
     _configure_logging(args.loglevel, args.log)
     log = logging.getLogger(__name__)
+
+    if args.omm_prepare_only:
+        _prepare_opencg_pdb(args, parser)
+        return
 
     # ── validate port requirement ─────────────────────────────────────────────
     if args.test is None and args.port is None:

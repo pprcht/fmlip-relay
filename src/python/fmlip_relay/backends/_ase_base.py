@@ -53,6 +53,10 @@ class _ASEComputeMixin(BackendBase):
         # uninitialised caller default) collapses to the ground-state singlet.
         atoms.info["charge"] = charge
         atoms.info["spin"] = spin if spin >= 1 else 1
+        # Backends that model a field response (mace_polar) set this.
+        external_field = getattr(self, "_external_field", None)
+        if external_field is not None:
+            atoms.info["external_field"] = list(external_field)
         atoms.calc = self._calc
 
         energy = float(atoms.get_potential_energy()) * sE

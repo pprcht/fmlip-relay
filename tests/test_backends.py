@@ -411,3 +411,43 @@ class TestASEMixin:
         b._calc.calculate = spy
         b.compute(*self._args(1.2), False, -1, 0)
         assert seen["charge"] == -1 and seen["spin"] == 1
+
+
+# ── custom backend: ASE calculator from a user script ─────────────────────────
+
+class TestCustomBackend:
+    ase = pytest.importorskip("ase")
+
+    def test_loads_script_and_computes(self, tmp_path, two_atoms_far):
+        script = tmp_path / "ase_custom.py"
+        script.write_text(
+            "from ase.calculators.lj import LennardJones\n"
+            "def create_calculator():\n"
+            "    return LennardJones(epsilon=0.0104, sigma=3.40, rc=8.5)\n"
+        )
+        from fmlip_relay.backends.custom import CustomBackend
+        b = CustomBackend(str(script))
+        Z, pos, cell, pbc = two_atoms_far
+        e, f, s = b.compute(Z, pos, cell, pbc, False, 0, 1)
+        assert np.isfinite(e)
+        np.testing.assert_allclose(f[0], -f[1])
+
+    def test_missing_factory_rejected(self, tmp_path):
+        script = tmp_path / "bad.py"
+        script.write_text("x = 1\n")
+        from fmlip_relay.backends.custom import CustomBackend
+        with pytest.raises(TypeError):
+            CustomBackend(str(script))
+
+
+# ── nequip backend: temp dir is removed when loading fails ────────────────────
+
+def test_nequip_cleans_tmpdir_on_failure(tmp_path, monkeypatch):
+    import os, tempfile
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    from fmlip_relay.backends.nequip import NequIPBackend
+    with pytest.raises(Exception):
+        NequIPBackend("/nonexistent/model.nequip.pt2")
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith("fmlip-relay-")]
+    monkeypatch.setattr(tempfile, "tempdir", None)

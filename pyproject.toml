@@ -24,6 +24,27 @@ uma = [
     "fairchem-core>=2.0",
     "ase>=3.22",
 ]
+nequip = [
+    "nequip",
+    "ase>=3.22",
+]
+allegro = [
+    "nequip",
+    "nequip-allegro",
+    "ase>=3.22",
+]
+deepmd = [
+    "deepmd-kit",
+    "ase>=3.22",
+]
+schnet = [
+    "schnetpack",
+    "ase>=3.22",
+]
+openmm = [
+    "openmm",
+    "pyyaml",
+]
 dev = [
     "pytest",
     "pytest-cov",

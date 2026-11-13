@@ -152,6 +152,13 @@ For molecular clusters (no PBC), pass `pbc = [0, 0, 0]` and `compute_stress = 0`
 | MACE-MP | `mace_mp`| `mace-torch`, `ase` | Materials Project foundation model (89 elements) |
 | MACE-OFF| `mace_off`| `mace-torch`, `ase` | Organic foundation force field (10 elements) |
 | UMA     | `uma`    | `fairchem-core`, `ase` | Meta FAIR universal model; multi-task (`--uma-task omol\|omat\|omc\|oc20\|odac`); gated HF checkpoints; `pip install ".[uma]"` |
+| MACE-POLAR | `mace_polar` | `mace-torch>=0.3.16`, `ase` | Electrostatic MACE-POLAR-1 models (`--model polar-1-s`, a path or a URL); uses charge and spin. The foundation weights are under the Academic Software Licence |
+| NequIP  | `nequip` | `nequip`, `ase` | Model compiled with `nequip-compile`; inductor cache in a private temp dir under `$TMPDIR` |
+| Allegro | `allegro`| `nequip`, `nequip-allegro`, `ase` | Same loader as `nequip` |
+| DeepMD  | `deepmd` | `deepmd-kit`, `ase` | `--device cpu\|cuda`; `--dtype` maps to `DP_INTERFACE_PREC` |
+| SchNet  | `schnet` | `schnetpack`, `ase` | Neighbour-list cutoff fixed at 5 Å |
+| OpenMM  | `openmm` | `openmm` (`pyyaml` for YAML configs; `OpenCGChromatin` for OPENCG) | Classical force fields from AMBER, GROMACS, CHARMM or OpenCG inputs (`--omm-*` options); `--device` picks the platform. Returns kJ/mol and kJ/mol/Å, not eV |
+| Custom  | `custom` | `ase` | Any ASE calculator returned by `create_calculator()` in the script given with `--model` (default `./ase_custom.py`) |
 
 ### UMA parameters
 

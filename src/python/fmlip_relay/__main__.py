@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import sys
 
 from .backends import get_backend_class
@@ -57,10 +58,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── required ──────────────────────────────────────────────────────────────
     p.add_argument("--port",    type=int, default=None,
-                   help="TCP port to listen on (loopback only). "
+                   help="TCP port to listen on (loopback only). 0 lets the OS "
+                        "pick a free port, announced as 'READY <port>'. "
                         "Required unless --test is used.")
     p.add_argument("--backend", type=str, required=True,
                    help="Backend name: mace | mace_mp | mace_off | uma | lj | dummy")
+    p.add_argument("--exit-on-disconnect", action="store_true", default=False,
+                   help="Shut the server down when the client disconnects "
+                        "without QUIT (e.g. the Fortran parent crashed), "
+                        "instead of waiting for a new connection.")
 
     # ── test mode ─────────────────────────────────────────────────────────────
     grp_test = p.add_argument_group("Single-point test options  (--test)")
@@ -97,8 +103,14 @@ def _build_parser() -> argparse.ArgumentParser:
     grp_nn = p.add_argument_group(
         "Shared neural-network options  (mace | mace_mp | mace_off | uma)"
     )
-    grp_nn.add_argument("--device", type=str, default="cpu",
+    grp_nn.add_argument("--device", type=str.lower, default="cpu",
                         help="PyTorch device string, e.g. cpu | cuda | cuda:0")
+    grp_nn.add_argument("--e-to-ev", type=float, default=1.0, metavar="F",
+                        help="eV per model energy unit, for models trained in "
+                             "other units (ASE-based backends)")
+    grp_nn.add_argument("--l-to-ang", type=float, default=1.0, metavar="F",
+                        help="Angstrom per model length unit, for models "
+                             "trained in other units (ASE-based backends)")
     grp_nn.add_argument("--max-threads", type=int, default=None, metavar="N",
                         help="Cap CPU threads this server may use for inference "
                              "(sets OMP/MKL/BLAS thread env + torch.set_num_threads). "
@@ -181,6 +193,26 @@ def _configure_logging(loglevel: str, logfile: str | None) -> None:
         handlers=handlers,
     )
     logging.getLogger("fmlip_relay").setLevel(getattr(logging, loglevel))
+
+
+_terminating = False
+
+
+def _handle_termination(signum, _frame) -> None:
+    """Turn SIGTERM/SIGHUP/SIGINT into SystemExit so ``backend.close()`` runs.
+
+    Further signals are ignored while shutting down, so a second kill from
+    the Fortran side does not interrupt the cleanup.
+    """
+    global _terminating
+    if _terminating:
+        return
+    _terminating = True
+    print(f"fmlip-relay: received signal {signum}, shutting down",
+          file=sys.stderr, flush=True)
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, signal.SIG_IGN)
+    raise SystemExit(128 + signum)
 
 
 def _limit_threads(n: int) -> None:
@@ -285,6 +317,9 @@ def _build_backend(args: argparse.Namespace):
 
 
 def main(argv: list[str] | None = None) -> None:
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, _handle_termination)
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -323,6 +358,8 @@ def main(argv: list[str] | None = None) -> None:
         backend = _build_backend(args)
     except (KeyError, ValueError) as exc:
         parser.error(str(exc))
+    backend._e_to_ev = args.e_to_ev
+    backend._l_to_ang = args.l_to_ang
 
     # torch is now imported (transitively via the backend); enforce the cap at
     # the runtime level too, in case it was already imported elsewhere.
@@ -335,13 +372,16 @@ def main(argv: list[str] | None = None) -> None:
 
     log.info("Backend '%s' loaded successfully.", backend.name)
 
-    # ── test mode ─────────────────────────────────────────────────────────────
-    if args.test is not None:
-        sys.exit(test_mode.run_test(backend, args.test,
-                                    charge=args.charge, spin=args.spin))
+    try:
+        # ── test mode ─────────────────────────────────────────────────────────
+        if args.test is not None:
+            sys.exit(test_mode.run_test(backend, args.test,
+                                        charge=args.charge, spin=args.spin))
 
-    # ── server mode ───────────────────────────────────────────────────────────
-    server.run(args.port, backend)
+        # ── server mode ───────────────────────────────────────────────────────
+        server.run(args.port, backend, exit_on_disconnect=args.exit_on_disconnect)
+    finally:
+        backend.close()
 
 
 if __name__ == "__main__":

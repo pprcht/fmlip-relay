@@ -365,3 +365,49 @@ class TestImageVectors:
         imgs = _image_vectors(cell, pbc)
         xs = sorted(set(imgs[:, 0]))
         assert xs == pytest.approx([-L, 0.0, L])
+
+
+# ── _ASEComputeMixin: unit conversion and unset charge/spin ───────────────────
+
+class TestASEMixin:
+    ase = pytest.importorskip("ase")
+
+    def _backend(self, e_to_ev=1.0, l_to_ang=1.0):
+        from ase.calculators.lj import LennardJones
+        from fmlip_relay.backends._ase_base import _ASEComputeMixin
+
+        class _LJ(_ASEComputeMixin):
+            def __init__(self):
+                self._calc = LennardJones(epsilon=1.0, sigma=1.0, rc=3.0)
+
+        b = _LJ()
+        b._e_to_ev = e_to_ev
+        b._l_to_ang = l_to_ang
+        return b
+
+    def _args(self, r):
+        Z   = np.array([18, 18], dtype=np.int32)
+        pos = np.array([[0.0, 0.0, 0.0], [r, 0.0, 0.0]])
+        return Z, pos, np.eye(3) * 50.0, np.array([False] * 3)
+
+    def test_unit_scaling(self):
+        """A model in (2 eV, 0.5 Å) units at r = 0.6 Å sees r = 1.2 model units."""
+        ref_e, ref_f, _ = self._backend().compute(*self._args(1.2), False, 0, 1)
+        e, f, _ = self._backend(e_to_ev=2.0, l_to_ang=0.5).compute(
+            *self._args(0.6), False, 0, 1)
+        assert e == pytest.approx(2.0 * ref_e)
+        np.testing.assert_allclose(f, ref_f * 2.0 / 0.5)
+
+    def test_charge_spin_reach_atoms_info(self):
+        """Charge and spin are always set; a stray spin 0 becomes a singlet."""
+        seen = {}
+        b = self._backend()
+        orig = b._calc.calculate
+
+        def spy(atoms=None, *a, **kw):
+            seen.update(atoms.info)
+            return orig(atoms, *a, **kw)
+
+        b._calc.calculate = spy
+        b.compute(*self._args(1.2), False, -1, 0)
+        assert seen["charge"] == -1 and seen["spin"] == 1

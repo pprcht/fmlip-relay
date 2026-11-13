@@ -232,6 +232,12 @@ call mlip_finalize_all(ierr)
 
 For MPI, give each rank its own port range: `port = base_port + mpi_rank * 100 + local_instance`.
 
+Alternatively, start every server with `--port 0`: the OS assigns a free port, the server announces it as `READY <port>`, and `mlip_init` connects to that port (the `port` argument is then ignored). This avoids port collisions between jobs sharing a node. Adding `--exit-on-disconnect` makes a server shut down when its client goes away without sending QUIT, e.g. after a crash.
+
+### Models in other units
+
+ASE-based backends accept `--e-to-ev F` (eV per model energy unit) and `--l-to-ang F` (Å per model length unit). Coordinates are converted into model units before the call, and energy, forces and stress are converted back, so the wire protocol stays in eV and Å.
+
 ---
 
 ## Adding a New Backend

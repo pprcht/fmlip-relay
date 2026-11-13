@@ -204,11 +204,15 @@ int wait_for_line_c(int fd, const char *prefix, int timeout_sec)
 }
 
 /**
- * Send SIGTERM to pid.
+ * Send SIGTERM to the process group led by pid.
+ * spawn_process_c() runs the command via "sh -c" in a new session, so pid
+ * is the shell; if the shell forked instead of exec'ing, the server is a
+ * child and only a group kill reaches it.  Falls back to pid alone.
  */
 void kill_process_c(int pid)
 {
-    if (pid > 0) kill((pid_t)pid, SIGTERM);
+    if (pid <= 0) return;
+    if (kill(-(pid_t)pid, SIGTERM) < 0) kill((pid_t)pid, SIGTERM);
 }
 
 

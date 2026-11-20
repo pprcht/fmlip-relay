@@ -114,6 +114,13 @@ _BACKENDS = [
     ("mace_mp",  "fmlip_relay.backends.mace_mp", "MACEMPBackend", "MACE-MP foundation (89 elements)",  None),
     ("mace_off", "fmlip_relay.backends.mace_off","MACEOFFBackend","MACE-OFF foundation (organic)",      None),
     ("uma",      "fmlip_relay.backends.uma",     "UMABackend",    "UMA universal model (fairchem)",    None),
+    ("mace_polar","fmlip_relay.backends.mace",   "MACEPolarBackend","MACE-POLAR-1 electrostatic",     None),
+    ("nequip",   "fmlip_relay.backends.nequip",  "NequIPBackend", "Compiled NequIP model",             None),
+    ("allegro",  "fmlip_relay.backends.allegro", "AllegroBackend","Compiled Allegro model",            None),
+    ("deepmd",   "fmlip_relay.backends.deepmd",  "DeepMDBackend", "DeepMD-kit model",                  None),
+    ("schnet",   "fmlip_relay.backends.schnet",  "SchNetBackend", "SchNetPack model",                  None),
+    ("openmm",   "fmlip_relay.backends.openmm",  "OpenMMBackend", "OpenMM classical force field",      None),
+    ("custom",   "fmlip_relay.backends.custom",  "CustomBackend", "ASE calculator from a user script", None),
 ]
 
 

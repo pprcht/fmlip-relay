@@ -10,6 +10,8 @@
 !>       Spawn Python server, wait for "READY", open socket.
 !>       server_cmd is the full shell command, e.g.:
 !>         "fmlip-relay-server --port 54321 --backend mace --model /path/to/model.model"
+!>       With "--port 0" the server binds a free port and announces it as
+!>       "READY <port>"; the announced port then overrides the port argument.
 !>
 !>   mlip_compute   (iid, natoms, positions, cell, pbc, compute_stress, charge, spin,
 !>                   energy, forces, stress, ierr)
@@ -132,8 +134,15 @@ contains
   !> mlip_init – spawn server and connect
   ! ════════════════════════════════════════════════════════════════════════════
   subroutine mlip_init(iid,port,server_cmd,timeout_sec,ierr)
+    !*****************************************************
+    !* Spawn the server, wait for its READY line and
+    !* connect. If the server announces "READY <port>"
+    !* (started with --port 0), that port is used instead
+    !* of the port argument. On failure the half-started
+    !* instance is cleaned up and ierr = MLIP_ERR.
+    !*****************************************************
     integer,intent(in)  :: iid          !< instance id  [1..MLIP_MAX_INSTANCES]
-    integer,intent(in)  :: port         !< TCP port for this instance
+    integer,intent(in)  :: port         !< TCP port, ignored if the server announces one
     character(len=*),intent(in)  :: server_cmd   !< full shell command to launch the server
     !<   e.g. "fmlip-relay-server --port 54321 --backend mace --model /path/model.model"
     integer,intent(in)  :: timeout_sec  !< seconds to wait for READY
@@ -164,33 +173,49 @@ contains
     instances(iid)%stdout_fd = int(stdout_fd_c)
     instances(iid)%port = port
 
-    ! ── wait for "READY" on stdout ────────────────────────────────────────────
+    !>-- wait for "READY" or "READY <port>" on stdout
     rc = wait_for_line_c(stdout_fd_c,c_str("READY"),int(timeout_sec,c_int))
-    if (rc /= 0) then
+    if (rc < 0) then
       write (stdout,'(A,I0,A)') "[mlip_init] instance ",iid,": timeout waiting for READY signal"
-      call kill_process_c(pid_c)
+      call abort_startup(iid)
       return
     end if
+    if (rc > 0) instances(iid)%port = int(rc)   ! port announced by the server
 
     ! ── connect socket (retry briefly in case server isn't listening yet) ────
     retries = 0
     instances(iid)%sock_fd = -1
     do while (instances(iid)%sock_fd < 0.and.retries < 10)
       instances(iid)%sock_fd = int( &
-                               sock_connect_c(c_str("127.0.0.1"),int(port,c_int)))
+                               sock_connect_c(c_str("127.0.0.1"),int(instances(iid)%port,c_int)))
       if (instances(iid)%sock_fd < 0) then
         call usleep_f(retry_delay_us)
         retries = retries+1
       end if
     end do
     if (instances(iid)%sock_fd < 0) then
-      write (stdout,'(A,I0,A)') "[mlip_init] instance ",iid,": failed to connect to server"; return
+      write (stdout,'(A,I0,A)') "[mlip_init] instance ",iid,": failed to connect to server"
+      call abort_startup(iid)
+      return
     end if
 
     instances(iid)%active = .true.
     ierr = MLIP_OK
-    write (stdout,'(A,I0,A,I0)') "[mlip_init] instance ",iid,": ready on port ",port
+    write (stdout,'(A,I0,A,I0)') "[mlip_init] instance ",iid,": ready on port ",instances(iid)%port
   end subroutine mlip_init
+
+  subroutine abort_startup(iid)
+    !***********************************************
+    !* Release a half-started instance: close the
+    !* stdout pipe, kill the child, reset the slot.
+    !***********************************************
+    integer,intent(in) :: iid
+    if (instances(iid)%stdout_fd >= 0) &
+      call sock_close_c(int(instances(iid)%stdout_fd,c_int))
+    if (instances(iid)%proc_pid > 0) &
+      call kill_process_c(int(instances(iid)%proc_pid,c_int))
+    instances(iid) = mlip_instance_t()
+  end subroutine abort_startup
 
   ! ════════════════════════════════════════════════════════════════════════════
   !> mlip_compute – send coordinates, receive energy/forces/stress

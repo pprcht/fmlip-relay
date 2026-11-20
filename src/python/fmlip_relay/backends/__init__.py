@@ -40,6 +40,48 @@ def _register_optional() -> None:
     except ImportError:
         pass
 
+    try:
+        from .mace import MACEPolarBackend
+        _REGISTRY["mace_polar"] = MACEPolarBackend
+    except ImportError:
+        pass
+
+    try:
+        from .nequip import NequIPBackend
+        _REGISTRY["nequip"] = NequIPBackend
+    except ImportError:
+        pass
+
+    try:
+        from .allegro import AllegroBackend
+        _REGISTRY["allegro"] = AllegroBackend
+    except ImportError:
+        pass
+
+    try:
+        from .deepmd import DeepMDBackend
+        _REGISTRY["deepmd"] = DeepMDBackend
+    except ImportError:
+        pass
+
+    try:
+        from .schnet import SchNetBackend
+        _REGISTRY["schnet"] = SchNetBackend
+    except ImportError:
+        pass
+
+    try:
+        from .openmm import OpenMMBackend
+        _REGISTRY["openmm"] = OpenMMBackend
+    except ImportError:
+        pass
+
+    try:
+        from .custom import CustomBackend
+        _REGISTRY["custom"] = CustomBackend
+    except ImportError:
+        pass
+
 _register_optional()
 
 

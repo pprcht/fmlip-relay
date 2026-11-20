@@ -133,44 +133,86 @@ int spawn_process_c(const char *cmd, int *stdout_fd_out)
 
 /**
  * Read from fd until a line matching prefix is found (or error/EOF).
- * Returns 0 if found, -1 otherwise.
+ * Returns parsed port (>0) for "READY <port>", 0 for plain "READY", -1 on timeout/error.
  */
 int wait_for_line_c(int fd, const char *prefix, int timeout_sec)
 {
     /* set non-blocking read with simple timeout loop */
     char buf[512];
     int  pos = 0;
-    time_t deadline = time(NULL) + timeout_sec;
+    time_t start_time = time(NULL);
+    time_t deadline = start_time + timeout_sec;
+    time_t now;
+    time_t next_report = start_time + 60;
     int   plen = (int)strlen(prefix);
+    int old_flags;
+    char *endptr;
+    long parsed_port;
 
-    while (time(NULL) < deadline) {
+    old_flags = fcntl(fd, F_GETFL, 0);
+    if (old_flags < 0) return -1;
+
+    if (fcntl(fd, F_SETFL, old_flags | O_NONBLOCK) < 0) return -1;
+
+    while ((now = time(NULL)) < deadline) {
+        if (now >= next_report) {
+            fprintf(stdout,
+                    "mlip_init: still waiting for READY signal (%ld s elapsed)\n",
+                    (long)(now - start_time));
+            fflush(stdout);
+            next_report += 60;
+        }
         ssize_t n = read(fd, buf + pos, 1);
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 usleep(10000); /* 10 ms */
                 continue;
             }
+            fcntl(fd, F_SETFL, old_flags);
             return -1;
         }
-        if (n == 0) return -1;   /* EOF */
+        if (n == 0) {
+            fcntl(fd, F_SETFL, old_flags);
+            return -1; /* EOF */
+        }
         if (buf[pos] == '\n') {
             buf[pos] = '\0';
-            if (strncmp(buf, prefix, (size_t)plen) == 0) return 0;
-            pos = 0;             /* next line */
+            if (strncmp(buf, prefix, (size_t)plen) == 0) {
+                if (buf[plen] == '\0') {
+                    fcntl(fd, F_SETFL, old_flags);
+                    return 0;
+                }
+                if (buf[plen] == ' ') {
+                    parsed_port = strtol(buf + plen + 1, &endptr, 10);
+                    if ((endptr != buf + plen + 1) && (*endptr == '\0') &&
+                        (parsed_port > 0) && (parsed_port <= 65535)) {
+                        fcntl(fd, F_SETFL, old_flags);
+                        return (int)parsed_port;
+                    }
+                }
+                fcntl(fd, F_SETFL, old_flags);
+                return 0;
+            }
+            pos = 0; /* next line */
         } else {
             pos++;
             if (pos >= 511) pos = 511; /* guard */
         }
     }
+    fcntl(fd, F_SETFL, old_flags);
     return -1; /* timeout */
 }
 
 /**
- * Send SIGTERM to pid.
+ * Send SIGTERM to the process group led by pid.
+ * spawn_process_c() runs the command via "sh -c" in a new session, so pid
+ * is the shell; if the shell forked instead of exec'ing, the server is a
+ * child and only a group kill reaches it.  Falls back to pid alone.
  */
 void kill_process_c(int pid)
 {
-    if (pid > 0) kill((pid_t)pid, SIGTERM);
+    if (pid <= 0) return;
+    if (kill(-(pid_t)pid, SIGTERM) < 0) kill((pid_t)pid, SIGTERM);
 }
 
 

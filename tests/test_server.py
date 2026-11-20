@@ -324,3 +324,69 @@ class TestErrorHandling:
         status, = struct.unpack('<i', recv_exactly(c2, 4))
         c2.close()
         assert status == STATUS_OK
+
+
+# ── --exit-on-disconnect ──────────────────────────────────────────────────────
+
+class TestExitOnDisconnect:
+    def _start(self):
+        port = _free_port()
+        thread = threading.Thread(
+            target=server.run,
+            args=(port, DummyBackend(seed=0)),
+            kwargs=dict(exit_on_disconnect=True),
+            daemon=True,
+        )
+        thread.start()
+        for _ in range(50):
+            try:
+                c = socket.create_connection(("127.0.0.1", port))
+                return thread, c
+            except ConnectionRefusedError:
+                time.sleep(0.05)
+        raise RuntimeError("Server did not start in time")
+
+    def test_disconnect_stops_server(self):
+        thread, c = self._start()
+        c.sendall(struct.pack('<i', MSG_PING))
+        status, = struct.unpack('<i', recv_exactly(c, 4))
+        assert status == STATUS_OK
+        c.close()
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+
+    def test_unknown_message_stops_server(self):
+        thread, c = self._start()
+        c.sendall(struct.pack('<i', 255))
+        c.close()
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+
+
+# ── port 0: OS-assigned port, announced on stdout ─────────────────────────────
+
+class TestPortZero:
+    def test_ready_line_announces_port(self):
+        import subprocess, sys
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "fmlip_relay",
+             "--port", "0", "--backend", "dummy", "--loglevel", "WARNING"],
+            stdout=subprocess.PIPE, text=True,
+        )
+        try:
+            line = proc.stdout.readline().strip()
+            word, port_s = line.split()
+            assert word == "READY"
+            port = int(port_s)
+            assert 0 < port < 65536
+
+            c = socket.create_connection(("127.0.0.1", port), timeout=5)
+            c.sendall(struct.pack('<i', MSG_PING))
+            status, = struct.unpack('<i', recv_exactly(c, 4))
+            c.sendall(struct.pack('<i', MSG_QUIT))
+            c.close()
+            assert status == STATUS_OK
+            assert proc.wait(timeout=10) == 0
+        finally:
+            if proc.poll() is None:
+                proc.kill()

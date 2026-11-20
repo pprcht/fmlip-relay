@@ -152,6 +152,13 @@ For molecular clusters (no PBC), pass `pbc = [0, 0, 0]` and `compute_stress = 0`
 | MACE-MP | `mace_mp`| `mace-torch`, `ase` | Materials Project foundation model (89 elements) |
 | MACE-OFF| `mace_off`| `mace-torch`, `ase` | Organic foundation force field (10 elements) |
 | UMA     | `uma`    | `fairchem-core`, `ase` | Meta FAIR universal model; multi-task (`--uma-task omol\|omat\|omc\|oc20\|odac`); gated HF checkpoints; `pip install ".[uma]"` |
+| MACE-POLAR | `mace_polar` | `mace-torch>=0.3.16`, `ase` | Electrostatic MACE-POLAR-1 models (`--model polar-1-s`, a path or a URL); uses charge and spin. The foundation weights are under the Academic Software Licence |
+| NequIP  | `nequip` | `nequip`, `ase` | Model compiled with `nequip-compile`; inductor cache in a private temp dir under `$TMPDIR` |
+| Allegro | `allegro`| `nequip`, `nequip-allegro`, `ase` | Same loader as `nequip` |
+| DeepMD  | `deepmd` | `deepmd-kit`, `ase` | `--device cpu\|cuda`; `--dtype` maps to `DP_INTERFACE_PREC` |
+| SchNet  | `schnet` | `schnetpack`, `ase` | Neighbour-list cutoff fixed at 5 Å |
+| OpenMM  | `openmm` | `openmm` (`pyyaml` for YAML configs; `OpenCGChromatin` for OPENCG) | Classical force fields from AMBER, GROMACS, CHARMM or OpenCG inputs (`--omm-*` options); `--device` picks the platform. Returns kJ/mol and kJ/mol/Å, not eV |
+| Custom  | `custom` | `ase` | Any ASE calculator returned by `create_calculator()` in the script given with `--model` (default `./ase_custom.py`) |
 
 ### UMA parameters
 
@@ -231,6 +238,12 @@ call mlip_finalize_all(ierr)
 ```
 
 For MPI, give each rank its own port range: `port = base_port + mpi_rank * 100 + local_instance`.
+
+Alternatively, start every server with `--port 0`: the OS assigns a free port, the server announces it as `READY <port>`, and `mlip_init` connects to that port (the `port` argument is then ignored). This avoids port collisions between jobs sharing a node. Adding `--exit-on-disconnect` makes a server shut down when its client goes away without sending QUIT, e.g. after a crash.
+
+### Models in other units
+
+ASE-based backends accept `--e-to-ev F` (eV per model energy unit) and `--l-to-ang F` (Å per model length unit). Coordinates are converted into model units before the call, and energy, forces and stress are converted back, so the wire protocol stays in eV and Å.
 
 ---
 

@@ -24,7 +24,16 @@ Response layout (Python → Fortran)
   float64        energy      [eV]
   float64 × 3N   forces      [eV/Å, atom-major]
   float64 × 9    stress      [eV/Å³, row-major]
+  float64 × N    atomic energies [eV]   (COMPUTE_ATOMIC only)
+
+COMPUTE_ATOMIC takes the same request as COMPUTE; only its response is longer.
+
+HESSIAN also takes the COMPUTE request (compute_stress is ignored) and answers
+  int32            status
+  float64 × 9N²    hessian     [eV/Å², (3N, 3N) row-major]   (only if status is OK)
 """
+
+from __future__ import annotations
 
 import struct
 import socket
@@ -34,6 +43,8 @@ import numpy as np
 MSG_COMPUTE = 1
 MSG_QUIT    = 2
 MSG_PING    = 3
+MSG_COMPUTE_ATOMIC = 4   # COMPUTE, with per-atom energies in the response
+MSG_HESSIAN = 5          # second derivatives of the energy
 
 # ── status codes ──────────────────────────────────────────────────────────────
 STATUS_OK    = 0
@@ -102,17 +113,41 @@ def read_compute_request(conn: socket.socket) -> ComputeRequest:
 def write_ok_response(conn: socket.socket,
                       energy: float,
                       forces: np.ndarray,
-                      stress: np.ndarray) -> None:
+                      stress: np.ndarray,
+                      atomic_energies: np.ndarray | None = None) -> None:
+    """Send an OK response; *atomic_energies* is appended for COMPUTE_ATOMIC."""
     resp  = struct.pack('<i', STATUS_OK)
     resp += struct.pack('<d', energy)
     resp += forces.astype('<f8').tobytes()
     resp += stress.astype('<f8').tobytes()
+    if atomic_energies is not None:
+        resp += np.asarray(atomic_energies).astype('<f8').tobytes()
     send_all(conn, resp)
 
 
-def write_error_response(conn: socket.socket, natoms: int) -> None:
+def write_error_response(conn: socket.socket, natoms: int,
+                         atomic: bool = False) -> None:
+    """Send a zero-filled ERROR response of the same length as an OK one."""
     resp  = struct.pack('<i', STATUS_ERROR)
     resp += struct.pack('<d', 0.0)
     resp += np.zeros((natoms, 3), dtype='<f8').tobytes()
     resp += np.zeros((3, 3),      dtype='<f8').tobytes()
+    if atomic:
+        resp += np.zeros(natoms, dtype='<f8').tobytes()
     send_all(conn, resp)
+
+
+def write_hessian_response(conn: socket.socket, hessian: np.ndarray) -> None:
+    """Send an OK status followed by the (3N, 3N) Hessian.
+
+    Unlike COMPUTE, a failed HESSIAN request is answered with the status
+    alone (see :func:`write_status`), since a zero-filled matrix of this
+    size would be wasteful.
+    """
+    send_all(conn, struct.pack('<i', STATUS_OK))
+    send_all(conn, np.ascontiguousarray(hessian, dtype='<f8').tobytes())
+
+
+def write_status(conn: socket.socket, status: int) -> None:
+    """Send a bare status word."""
+    send_all(conn, struct.pack('<i', status))

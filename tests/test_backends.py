@@ -412,6 +412,59 @@ class TestASEMixin:
         b.compute(*self._args(1.2), False, -1, 0)
         assert seen["charge"] == -1 and seen["spin"] == 1
 
+    def test_atomic_energies_from_calculator(self):
+        """A calculator with an ``energies`` result (EMT) is used as is."""
+        from ase import Atoms
+        from ase.calculators.emt import EMT
+        from fmlip_relay.backends._ase_base import _ASEComputeMixin
+
+        class _EMT(_ASEComputeMixin):
+            def __init__(self):
+                self._calc = EMT()
+
+        Z   = np.array([29, 29, 13], dtype=np.int32)
+        pos = np.array([[0.0, 0.0, 0.0], [2.4, 0.0, 0.0], [1.2, 2.2, 0.3]])
+        cell, pbc = np.eye(3) * 50.0, np.array([False] * 3)
+        b = _EMT()
+        b._e_to_ev = 2.0
+        e, f, s, e_at = b.compute_atomic(Z, pos, cell, pbc, False, 0, 1)
+
+        ref = Atoms(numbers=Z, positions=pos, cell=cell, pbc=pbc)
+        ref.calc = EMT()
+        np.testing.assert_allclose(e_at, 2.0 * ref.get_potential_energies())
+        assert e_at.sum() == pytest.approx(e)
+        e3, f3, _ = b.compute(Z, pos, cell, pbc, False, 0, 1)
+        assert e3 == pytest.approx(e)
+        np.testing.assert_allclose(f3, f)
+
+    def test_native_hessian_is_used_and_scaled(self):
+        """A calculator's get_hessian() wins over finite differences, in any
+        of the shapes with 9N² entries, and is converted to eV/Å²."""
+        b = self._backend(e_to_ev=2.0, l_to_ang=0.5)
+        native = np.arange(36, dtype=np.float64).reshape(6, 2, 3)
+        b._calc.get_hessian = lambda atoms: native
+        H = b.compute_hessian(*self._args(0.6), 0, 1)
+        ref = native.reshape(6, 6) * 2.0 / 0.5**2
+        np.testing.assert_allclose(H, 0.5 * (ref + ref.T))
+
+    def test_hessian_falls_back_to_finite_differences(self):
+        """No get_hessian, or one that raises: forces are differentiated."""
+        b = self._backend()
+        ref = b._numerical_hessian(*self._args(1.2), 0, 1)
+        np.testing.assert_allclose(b.compute_hessian(*self._args(1.2), 0, 1), ref)
+
+        def broken(atoms):
+            raise NotImplementedError
+        b._calc.get_hessian = broken
+        np.testing.assert_allclose(b.compute_hessian(*self._args(1.2), 0, 1), ref)
+
+    def test_atomic_energies_fallback(self):
+        """ASE's LennardJones here stands for any calculator; whatever it
+        gives, the result has one value per atom and sums to the total."""
+        e, _, _, e_at = self._backend().compute_atomic(*self._args(1.2), False, 0, 1)
+        assert e_at.shape == (2,)
+        assert e_at.sum() == pytest.approx(e)
+
 
 # ── custom backend: ASE calculator from a user script ─────────────────────────
 
@@ -501,3 +554,75 @@ AR 4
 
         assert e_omm == pytest.approx(e_lj, rel=1e-4)
         np.testing.assert_allclose(f_omm, f_lj, rtol=1e-4, atol=1e-7)
+
+
+# ── per-atom energies ─────────────────────────────────────────────────────────
+
+class TestAtomicEnergies:
+    def test_partition_equal_split(self):
+        from fmlip_relay.backends.base import partition_energy
+        np.testing.assert_allclose(partition_energy(-6.0, 3), [-2.0, -2.0, -2.0])
+
+    def test_partition_spreads_missing_part(self):
+        """A total larger than the model's sum (e.g. added dispersion) is
+        spread equally, so the result still sums to the total."""
+        from fmlip_relay.backends.base import partition_energy
+        e_at = partition_energy(-7.0, 3, [-1.0, -2.0, -3.0])
+        np.testing.assert_allclose(e_at, [-1.0 - 1/3, -2.0 - 1/3, -3.0 - 1/3])
+
+    def test_partition_ignores_wrong_shape(self):
+        from fmlip_relay.backends.base import partition_energy
+        np.testing.assert_allclose(partition_energy(-6.0, 3, [-1.0, -2.0]), [-2.0] * 3)
+
+    def test_base_default(self):
+        Z, pos = np.ones(4, dtype=np.int32), np.zeros((4, 3))
+        e, f, s, e_at = DummyBackend(seed=1).compute_atomic(
+            Z, pos, np.eye(3), np.array([False] * 3), False, 0, 1)
+        np.testing.assert_allclose(e_at, np.full(4, e / 4))
+
+    def test_lj_decomposition(self):
+        """Trimer with one atom far away: it carries no energy, the bonded
+        pair shares its energy equally."""
+        lj  = LJBackend(epsilon=1.0, sigma=1.0, r_cut=3.0)
+        Z   = np.full(3, 18, dtype=np.int32)
+        pos = np.array([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [20.0, 0.0, 0.0]])
+        args = (Z, pos, np.eye(3) * 100.0, np.array([False] * 3), False)
+        e, f, s, e_at = lj.compute_atomic(*args)
+        e_ref, f_ref, _ = lj.compute(*args)
+        assert e == pytest.approx(e_ref)
+        np.testing.assert_allclose(f, f_ref)
+        np.testing.assert_allclose(e_at, [e / 2, e / 2, 0.0], atol=1e-14)
+
+
+# ── Hessian ───────────────────────────────────────────────────────────────────
+
+class TestHessian:
+    def test_lj_dimer_matches_analytical_curvature(self):
+        """Along the bond the Hessian is +-U''(r), across it +-U'(r)/r."""
+        eps, sig, rc, r = 1.0, 1.0, 6.0, 1.3
+        lj  = LJBackend(epsilon=eps, sigma=sig, r_cut=rc)
+        Z   = np.full(2, 18, dtype=np.int32)
+        pos = np.array([[0.0, 0.0, 0.0], [r, 0.0, 0.0]])
+        H = lj.compute_hessian(Z, pos, np.eye(3) * 100.0, np.array([False] * 3), 0, 1)
+
+        dU  = lambda x: 4 * eps * (-12 * sig**12 / x**13 + 6 * sig**6 / x**7)
+        d2U = 4 * eps * (156 * sig**12 / r**14 - 42 * sig**6 / r**8)
+        k_par, k_perp = d2U, (dU(r) - dU(rc)) / r      # force-shifted cutoff
+        assert H.shape == (6, 6)
+        np.testing.assert_allclose(H, H.T)
+        assert H[0, 0] == pytest.approx(k_par, rel=1e-3)
+        assert H[0, 3] == pytest.approx(-k_par, rel=1e-3)
+        assert H[1, 1] == pytest.approx(k_perp, rel=1e-3)
+        assert H[1, 4] == pytest.approx(-k_perp, rel=1e-3)
+        np.testing.assert_allclose(H.sum(axis=1), 0.0, atol=1e-8)   # translation
+
+    def test_step_is_configurable(self):
+        lj = LJBackend(epsilon=1.0, sigma=1.0, r_cut=6.0)
+        args = (np.full(2, 18, dtype=np.int32),
+                np.array([[0.0, 0.0, 0.0], [1.3, 0.0, 0.0]]),
+                np.eye(3) * 100.0, np.array([False] * 3), 0, 1)
+        coarse = lj.compute_hessian(*args)
+        lj.hessian_step = 1e-4
+        fine = lj.compute_hessian(*args)
+        assert not np.array_equal(coarse, fine)
+        np.testing.assert_allclose(coarse, fine, rtol=1e-2, atol=1e-6)

@@ -97,6 +97,10 @@ def _build_parser() -> argparse.ArgumentParser:
                                "else 1 (ground-state singlet). Used by spin-aware "
                                "backends (e.g. UMA omol).")
 
+    grp_test.add_argument("--hessian", action="store_true", default=False,
+                          help="With --test: also compute the Hessian and print "
+                               "its lowest and highest eigenvalues.")
+
     # ── logging ───────────────────────────────────────────────────────────────
     p.add_argument("--log",      type=str, default=None,
                    help="Optional log file path (stderr is always used)")
@@ -485,7 +489,8 @@ def main(argv: list[str] | None = None) -> None:
         # ── test mode ─────────────────────────────────────────────────────────
         if args.test is not None:
             sys.exit(test_mode.run_test(backend, args.test,
-                                        charge=args.charge, spin=args.spin))
+                                        charge=args.charge, spin=args.spin,
+                                        hessian=args.hessian))
 
         # ── server mode ───────────────────────────────────────────────────────
         server.run(args.port, backend, exit_on_disconnect=args.exit_on_disconnect)

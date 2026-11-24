@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from fmlip_relay.protocol import (
-    MSG_COMPUTE, MSG_QUIT, MSG_PING,
+    MSG_COMPUTE, MSG_COMPUTE_ATOMIC, MSG_QUIT, MSG_PING,
     STATUS_OK, STATUS_ERROR,
     recv_exactly, send_all,
     ComputeRequest, read_compute_request,
@@ -266,3 +266,34 @@ class TestResponseWriters:
         raw = recv_exactly(r, 4)
         r.close()
         assert struct.unpack('<i', raw)[0] == STATUS_OK
+
+
+# ── COMPUTE_ATOMIC response: N extra doubles after the stress ─────────────────
+
+class TestAtomicResponse:
+    def test_message_type_is_distinct(self):
+        assert MSG_COMPUTE_ATOMIC == 4
+        assert len({MSG_COMPUTE, MSG_COMPUTE_ATOMIC, MSG_QUIT, MSG_PING}) == 4
+
+    def test_ok_response_appends_atomic_energies(self):
+        N = 3
+        w, r = socketpair()
+        e_at = np.array([-1.0, -2.0, -0.5])
+        write_ok_response(w, e_at.sum(), np.zeros((N, 3)), np.zeros((3, 3)), e_at)
+        w.close()
+        data = r.makefile("rb").read()
+        r.close()
+        assert len(data) == 4 + 8 + 24 * N + 72 + 8 * N
+        np.testing.assert_array_equal(np.frombuffer(data[-8 * N:], dtype="<f8"), e_at)
+
+    @pytest.mark.parametrize("atomic", [False, True])
+    def test_error_response_has_ok_length(self, atomic):
+        """A client reads the same number of bytes whatever the status."""
+        N = 5
+        w, r = socketpair()
+        write_error_response(w, N, atomic=atomic)
+        w.close()
+        data = r.makefile("rb").read()
+        r.close()
+        assert len(data) == 4 + 8 + 24 * N + 72 + (8 * N if atomic else 0)
+        assert struct.unpack("<i", data[:4])[0] == STATUS_ERROR

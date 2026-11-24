@@ -83,7 +83,7 @@ This avoids port collisions between independent jobs on the same node.
 
 ```fortran
 call mlip_compute(iid, natoms, atomic_numbers, positions, cell, pbc, compute_stress, &
-                  charge, spin, energy, forces, stress, ierr)
+                  charge, spin, energy, forces, stress, ierr [, atomic_energies])
 ```
 
 Sends one structure and receives energy, forces, and stress.
@@ -103,6 +103,7 @@ Sends one structure and receives energy, forces, and stress.
 | `forces` | `real(8)(3,natoms)` | out | Forces in eV/Å |
 | `stress` | `real(8)(3,3)` | out | Stress tensor in eV/Å³, zero if not requested |
 | `ierr` | `integer` | out | Status |
+| `atomic_energies` | `real(8)(natoms)`, optional | out | Per-atom energies in eV |
 
 `charge` and `spin` sit in the middle of the argument list.
 To omit them, pass the output arguments by keyword:
@@ -114,8 +115,61 @@ call mlip_compute(1, natoms, atomic_numbers, pos, cell, pbc, 1, &
 
 Charge and spin only affect backends that model them (UMA with the `omol` task, MACE-POLAR); all others ignore the values.
 
+#### Per-atom energies
+
+Passing the optional `atomic_energies` array requests a decomposition of the energy over the atoms:
+
+```fortran
+real(8) :: e_atom(natoms)
+
+call mlip_compute(1, natoms, atomic_numbers, pos, cell, pbc, 0, &
+                  energy=energy, forces=forces, stress=stress, ierr=ierr, &
+                  atomic_energies=e_atom)
+```
+
+The values always sum to `energy`.
+Models with a per-atom decomposition (the MACE family, `lj`, and `custom` calculators that provide ASE's `energies`) return it; all other backends return `energy/natoms` for every atom, see [Backends](backends.md#per-atom-energies).
+The request uses a separate message type, so calls without the argument are unchanged, and a server too old to know it makes the call return `MLIP_ERR`.
+
+#### Errors
+
 A backend exception on the Python side does not kill the server.
 The call returns `ierr = MLIP_ERR` with zeroed outputs, and the instance stays usable for the next structure.
+
+### `mlip_hessian`
+
+```fortran
+call mlip_hessian(iid, natoms, atomic_numbers, positions, cell, pbc, hessian, ierr [, charge, spin])
+```
+
+Returns the second derivatives of the energy with respect to the atomic positions.
+
+| Argument | Type | Intent | Description |
+|----------|------|--------|-------------|
+| `iid` | `integer` | in | Instance id |
+| `natoms` | `integer` | in | Number of atoms |
+| `atomic_numbers` | `integer(natoms)` | in | Atomic number Z of each atom |
+| `positions` | `real(8)(3,natoms)` | in | Cartesian coordinates in Å |
+| `cell` | `real(8)(3,3)` | in | Lattice vectors as rows, in Å |
+| `pbc` | `integer(3)` | in | 1 for a periodic axis, 0 otherwise |
+| `hessian` | `real(8)(3*natoms,3*natoms)` | out | Hessian in eV/Å², symmetric |
+| `ierr` | `integer` | out | Status |
+| `charge` | `integer`, optional | in | Total charge, default 0 |
+| `spin` | `integer`, optional | in | Spin multiplicity 2S+1, default 1 |
+
+Row and column `3*(i-1)+a` of `hessian` belong to Cartesian component `a` of atom `i`.
+For periodic systems the cell is held fixed.
+
+```fortran
+real(8) :: hess(3*natoms,3*natoms)
+
+call mlip_hessian(1, natoms, atomic_numbers, pos, cell, pbc, hess, ierr)
+```
+
+Backends that can differentiate their model return an analytical Hessian.
+All others compute it on the server from central finite differences of the forces, which takes 6·`natoms` force evaluations, so a call can run for a long time; see [Backends](backends.md#hessians).
+On failure `hessian` is zero and `ierr = MLIP_ERR`, and the instance stays usable.
+A server too old to know the request also gives `MLIP_ERR`.
 
 ### `mlip_ping`
 

@@ -60,14 +60,18 @@ $ fmlip-relay-server --backend lj --test ar3.xyz
   Wall time    : 1.8 ms
 ────────────────────────────────────────────────────────
 
-     #  sym            Fx            Fy            Fz  |F|
-     1   Ar     -0.001000     -0.001000     +0.000000  0.001414
-     2   Ar     -0.000752     +0.001752     +0.000000  0.001906
-     3   Ar     +0.001752     -0.000752     +0.000000  0.001906
+     #  sym            Fx            Fy            Fz         |F|          E_atom
+     1   Ar     -0.001000     -0.001000     +0.000000    0.001414       -0.009663
+     2   Ar     -0.000752     +0.001752     +0.000000    0.001906       -0.005808
+     3   Ar     +0.001752     -0.000752     +0.000000    0.001906       -0.005808
 ```
+
+The last column lists the per-atom energies in eV.
 
 Geometries are read with ASE when it is installed (XYZ, extended XYZ, CIF, POSCAR, and so on).
 Without ASE a built-in parser handles plain XYZ files, so the `dummy` and `lj` backends can be tested on a core install.
+
+Adding `--hessian` also computes the Hessian and prints its lowest and highest eigenvalues, a quick check that the six (or five) translational and rotational modes are near zero at a stationary point.
 
 `--charge Q` and `--spin M` set the total charge and the multiplicity 2S+1 for the evaluation.
 If omitted, the values are taken from the geometry file when it carries them, and default to 0 and 1 otherwise.

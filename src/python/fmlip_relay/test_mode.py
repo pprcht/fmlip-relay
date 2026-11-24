@@ -122,7 +122,8 @@ def read_geometry(
 
 
 def run_test(backend, geometry_path: str,
-             charge: int | None = None, spin: int | None = None) -> int:
+             charge: int | None = None, spin: int | None = None,
+             hessian: bool = False) -> int:
     """
     Load *geometry_path*, call ``backend.compute()`` once, print a summary,
     and return an exit code (0 = success, 1 = error).
@@ -165,7 +166,7 @@ def run_test(backend, geometry_path: str,
 
     t0 = time.perf_counter()
     try:
-        energy, forces, stress = backend.compute(
+        energy, forces, stress, atomic_energies = backend.compute_atomic(
             atomic_numbers, positions, cell, pbc,
             compute_stress=compute_stress,
             charge=used_charge, spin=used_spin,
@@ -182,7 +183,37 @@ def run_test(backend, geometry_path: str,
         energy, forces, stress, compute_stress, elapsed,
         atomic_numbers,
         used_charge, charge_src, used_spin, spin_src,
+        atomic_energies,
     )
+    if hessian:
+        return _run_hessian(backend, atomic_numbers, positions, cell, pbc,
+                            used_charge, used_spin)
+    return 0
+
+
+def _run_hessian(backend, atomic_numbers, positions, cell, pbc,
+                 charge, spin) -> int:
+    """Compute the Hessian once and print its extreme eigenvalues."""
+    t0 = time.perf_counter()
+    try:
+        hess = backend.compute_hessian(atomic_numbers, positions, cell, pbc,
+                                       charge, spin)
+    except Exception as exc:
+        print(f"\n[ERROR] Hessian computation failed: {exc}", file=sys.stderr)
+        log.exception("Backend raised an exception during the Hessian test.")
+        return 1
+    elapsed = time.perf_counter() - t0
+
+    eig = np.linalg.eigvalsh(hess)
+    sep = "─" * 56
+    print(sep)
+    print(f"  Hessian      : {hess.shape[0]} x {hess.shape[1]}  eV/Å²")
+    print(f"  Wall time    : {elapsed*1e3:.1f} ms")
+    print(f"  Eigenvalues  : {int((eig < -1e-3).sum())} below -1e-3")
+    nshow = min(8, len(eig))
+    print("    lowest     : " + "  ".join(f"{e:+.4f}" for e in eig[:nshow]))
+    print("    highest    : " + "  ".join(f"{e:+.4f}" for e in eig[-min(3, len(eig)):]))
+    print(sep + "\n")
     return 0
 
 
@@ -213,6 +244,7 @@ def _print_summary(
     charge_src: str,
     spin: int,
     spin_src: str,
+    atomic_energies: np.ndarray,
 ) -> None:
     # Element symbols — ASE if available, raw Z otherwise
     try:
@@ -259,11 +291,13 @@ def _print_summary(
 
     # Per-atom force table for small structures or when DEBUG logging is active
     if natoms <= 20 or logging.getLogger("fmlip_relay").isEnabledFor(logging.DEBUG):
-        print(f"\n  {'#':>4}  {'sym':>3}  {'Fx':>12}  {'Fy':>12}  {'Fz':>12}  |F|")
+        print(f"\n  {'#':>4}  {'sym':>3}  {'Fx':>12}  {'Fy':>12}  {'Fz':>12}"
+              f"  {'|F|':>10}  {'E_atom':>14}")
         for i, (sym, f) in enumerate(zip(symbols, forces)):
             fnorm = float(np.linalg.norm(f))
             print(
                 f"  {i+1:>4}  {sym:>3}  "
-                f"{f[0]:+12.6f}  {f[1]:+12.6f}  {f[2]:+12.6f}  {fnorm:.6f}"
+                f"{f[0]:+12.6f}  {f[1]:+12.6f}  {f[2]:+12.6f}  {fnorm:10.6f}"
+                f"  {atomic_energies[i]:+14.6f}"
             )
         print()

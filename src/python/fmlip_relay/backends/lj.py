@@ -83,8 +83,22 @@ class LJBackend(BackendBase):
                 charge:         int=0,
                 spin:           int=1,
                 ) -> tuple[float, np.ndarray, np.ndarray]:
+        return self.compute_atomic(atomic_numbers, positions, cell, pbc,
+                                   compute_stress, charge, spin)[:3]
+
+    def compute_atomic(self,
+                       atomic_numbers: np.ndarray,
+                       positions:      np.ndarray,
+                       cell:           np.ndarray,
+                       pbc:            np.ndarray,
+                       compute_stress: bool,
+                       charge:         int=0,
+                       spin:           int=1,
+                       ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray]:
+        """Each pair energy is shared equally between its two atoms."""
 
         natoms = positions.shape[0]
+        e_atom = np.zeros(natoms, dtype=np.float64)
         forces = np.zeros((natoms, 3), dtype=np.float64)
         stress = np.zeros((3, 3),      dtype=np.float64)
         energy = 0.0
@@ -122,6 +136,8 @@ class LJBackend(BackendBase):
             r_dist = np.sqrt(r2m)
             e_pair -= self._e_shift + self._f_shift * (r_dist - self._rcut)
             energy += e_pair.sum()
+            e_atom[i] += 0.5 * e_pair.sum()
+            np.add.at(e_atom, js, 0.5 * e_pair)
 
             # f_scalar = (dU_shifted/dr) / r = (dU/dr - f_shift) / r
             # dU/dr = 4ε(-12σ¹²/r¹³ + 6σ⁶/r⁷) = 4ε(-12·inv_r12 + 6·inv_r6) / r
@@ -144,7 +160,7 @@ class LJBackend(BackendBase):
             if vol > 1e-12:
                 stress /= vol
 
-        return float(energy), forces, stress
+        return float(energy), forces, stress, e_atom
 
     @property
     def name(self) -> str:

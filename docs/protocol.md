@@ -23,8 +23,11 @@ Every request starts with an `int32` message type.
 | 1 | `COMPUTE` | Structure, see below | Status, energy, forces, stress |
 | 2 | `QUIT` | none | none; the server shuts down |
 | 3 | `PING` | none | A single `int32` status (0) |
+| 4 | `COMPUTE_ATOMIC` | Same as `COMPUTE` | As `COMPUTE`, followed by per-atom energies |
+| 5 | `HESSIAN` | Same as `COMPUTE` | Status, then the Hessian |
 
 An unknown message type makes the server drop the connection.
+A server that predates a message type therefore rejects it cleanly instead of answering in a layout the client does not expect, and new message types can be added without touching the existing ones.
 
 ## COMPUTE request (client → server)
 
@@ -57,6 +60,43 @@ Offset   Type           Field
 
 The response always has the full length of 84 + 24*N* bytes.
 On `ERROR` (the backend raised an exception) energy, forces, and stress are zero, and the connection stays open for further requests.
+A client must read the complete response before looking at the status, since anything left unread would be taken for the start of the next response.
+
+## COMPUTE_ATOMIC
+
+The request is identical to `COMPUTE` except for `msg_type = 4`.
+The response carries one more block after the stress:
+
+```
+Offset   Type           Field
+─────────────────────────────────────────────
+ 0       int32          status
+ 4       float64        energy            [eV]
+12       float64 × 3N   forces            [eV/Å, atom-major]
+12+24N   float64 × 9    stress            [eV/Å³, row-major]
+84+24N   float64 × N    atomic_energies   [eV]
+```
+
+for a total of 84 + 32*N* bytes, also on `ERROR`.
+The atomic energies always sum to `energy`.
+Backends without a per-atom decomposition return `energy`/*N* for every atom.
+
+## HESSIAN
+
+The request is identical to `COMPUTE` except for `msg_type = 5`; the `compute_stress` field is ignored.
+
+```
+Offset   Type            Field
+─────────────────────────────────────────────
+ 0       int32           status    (0 = OK, 1 = ERROR)
+ 4       float64 × 9N²   hessian   [eV/Å², (3N, 3N) row-major]
+```
+
+The matrix is sent only if the status is `OK`.
+On `ERROR` the response ends after the status word, which differs from `COMPUTE`, where a zero-filled response of full length follows.
+Row and column 3*i* + *a* (counting from zero) belong to Cartesian component *a* of atom *i*.
+The server symmetrises the matrix, so row- and column-major order coincide.
+The cell is held fixed; no cell derivatives are included.
 
 ## Array ordering
 

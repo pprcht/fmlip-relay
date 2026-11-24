@@ -9,6 +9,8 @@ The reference is generated from the docstrings.
 .. autoclass:: fmlip_relay.backends.base.BackendBase
    :members:
 
+.. autofunction:: fmlip_relay.backends.base.partition_energy
+
 .. autofunction:: fmlip_relay.backends.get_backend_class
 
 .. autoclass:: fmlip_relay.backends._ase_base._ASEComputeMixin
@@ -24,6 +26,8 @@ The reference is generated from the docstrings.
 
 ```{eval-rst}
 .. autodata:: fmlip_relay.protocol.MSG_COMPUTE
+.. autodata:: fmlip_relay.protocol.MSG_COMPUTE_ATOMIC
+.. autodata:: fmlip_relay.protocol.MSG_HESSIAN
 .. autodata:: fmlip_relay.protocol.MSG_QUIT
 .. autodata:: fmlip_relay.protocol.MSG_PING
 .. autodata:: fmlip_relay.protocol.STATUS_OK
@@ -34,6 +38,8 @@ The reference is generated from the docstrings.
 .. autofunction:: fmlip_relay.protocol.read_compute_request
 .. autofunction:: fmlip_relay.protocol.write_ok_response
 .. autofunction:: fmlip_relay.protocol.write_error_response
+.. autofunction:: fmlip_relay.protocol.write_hessian_response
+.. autofunction:: fmlip_relay.protocol.write_status
 .. autofunction:: fmlip_relay.protocol.recv_exactly
 .. autofunction:: fmlip_relay.protocol.send_all
 ```

@@ -36,6 +36,35 @@ Run `fmlip-relay-check` to see which of these are usable in the current environm
 : Unit conversion for models trained in other units, see [Server](server.md#models-in-other-units).
   They apply to the ASE-based backends, i.e. all except `dummy`, `lj`, and `openmm`, which always work in Å and eV.
 
+## Per-atom energies
+
+Every backend can return per-atom energies next to the total (see [`mlip_compute`](fortran.md#mlip_compute)), and they always sum to the total energy.
+What they mean depends on the model:
+
+| Backends | Per-atom energies |
+|----------|-------------------|
+| `mace`, `mace_mp`, `mace_off`, `mace_polar` | The model's node energies |
+| `lj` | Half of each pair energy per atom |
+| `custom` | The calculator's `energies` result, if it has one |
+| all others | Total energy divided by the number of atoms |
+
+Any ASE calculator that reports `energies` is picked up automatically.
+If its values do not add up to the total, as with `--dispersion` for `mace_mp`, the difference is spread equally over the atoms.
+
+## Hessians
+
+Every backend can return a Hessian (see [`mlip_hessian`](fortran.md#mlip_hessian)), in eV/Å² and with the cell held fixed.
+
+| Backends | Hessian |
+|----------|---------|
+| `mace`, `mace_mp`, `mace_off`, `mace_polar` | Analytical, via automatic differentiation in the MACE calculator |
+| `custom` | Analytical if the calculator has `get_hessian()` or a `hessian` property |
+| all others | Central finite differences of the forces |
+
+The finite-difference route costs 6*N* force evaluations for *N* atoms and uses a displacement of 0.005 Å.
+Its accuracy is limited by the noise of the forces, which matters for models running in `float32`; use `--dtype float64` where the backend offers it.
+If an analytical Hessian fails, e.g. for a model type the calculator cannot differentiate, the server falls back to finite differences and logs that it did.
+
 ## Test backends
 
 ### `dummy`

@@ -15,7 +15,7 @@
 The Fortran client spawns a Python server per instance and talks to it over a loopback TCP socket.
 The model is loaded once at server startup, so every later evaluation costs a socket round trip (about 1 ms) instead of a model reload.
 
-* A small Fortran module (`fmlip_relay_client`) with five routines: init, compute, ping, finalize, finalize all
+* A small Fortran module (`fmlip_relay_client`) with a handful of routines: init, compute, Hessian, ping, finalize
 * Backends for MACE (custom, MP, OFF, POLAR), UMA, NequIP, Allegro, DeepMD, SchNet, OpenMM, and any ASE calculator
 * Up to 16 independent server instances, callable from separate OpenMP threads or MPI ranks
 * A plain binary wire protocol in Å and eV, with no dependencies on the Fortran side beyond a C compiler

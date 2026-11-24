@@ -24,7 +24,7 @@ import pytest
 from fmlip_relay.backends.dummy import DummyBackend
 from fmlip_relay.backends.lj    import LJBackend
 from fmlip_relay.protocol import (
-    MSG_COMPUTE, MSG_QUIT, MSG_PING,
+    MSG_COMPUTE, MSG_COMPUTE_ATOMIC, MSG_HESSIAN, MSG_QUIT, MSG_PING,
     STATUS_OK, STATUS_ERROR,
     recv_exactly,
 )
@@ -41,8 +41,8 @@ def _free_port() -> int:
 
 
 def _encode_compute(natoms, atomic_numbers, positions, cell, pbc, compute_stress,
-                    charge=0, spin=1):
-    buf  = struct.pack('<i', MSG_COMPUTE)
+                    charge=0, spin=1, msg_type=MSG_COMPUTE):
+    buf  = struct.pack('<i', msg_type)
     buf += struct.pack('<i', natoms)
     buf += atomic_numbers.astype('<i4').tobytes()
     buf += positions.astype('<f8').tobytes()
@@ -390,3 +390,121 @@ class TestPortZero:
         finally:
             if proc.poll() is None:
                 proc.kill()
+
+
+# ── COMPUTE_ATOMIC: per-atom energies after the regular response ──────────────
+
+class TestComputeAtomic:
+    def _roundtrip(self, handle, N, Z, pos, cell, pbc):
+        c = handle.connect()
+        c.sendall(_encode_compute(N, Z, pos, cell, pbc, False,
+                                  msg_type=MSG_COMPUTE_ATOMIC))
+        status, energy, forces, stress = _read_response(c, N)
+        e_at = np.frombuffer(recv_exactly(c, N * 8), dtype='<f8')
+        return c, status, energy, e_at
+
+    def test_fallback_splits_total_equally(self, dummy_server):
+        """DummyBackend has no decomposition: every atom gets E/N."""
+        N = 5
+        c, status, energy, e_at = self._roundtrip(dummy_server, N, *_simple_config(N))
+        c.close()
+        assert status == STATUS_OK
+        np.testing.assert_allclose(e_at, np.full(N, energy / N))
+
+    def test_lj_atomic_energies_sum_to_total(self, lj_server):
+        N = 4
+        Z   = np.full(N, 18, dtype=np.int32)
+        pos = np.array([[0, 0, 0], [1.2, 0, 0], [0, 1.5, 0], [2.5, 2.5, 0]], dtype=np.float64)
+        cell, pbc = np.eye(3) * 100.0, np.array([False] * 3)
+        c, status, energy, e_at = self._roundtrip(lj_server, N, Z, pos, cell, pbc)
+        assert status == STATUS_OK
+        assert e_at.sum() == pytest.approx(energy)
+        assert len(set(np.round(e_at, 12))) > 1     # a real decomposition
+
+        # a plain COMPUTE on the same connection is unaffected
+        c.sendall(_encode_compute(N, Z, pos, cell, pbc, False))
+        status2, energy2, _, _ = _read_response(c, N)
+        c.close()
+        assert status2 == STATUS_OK and energy2 == pytest.approx(energy)
+
+    def test_error_keeps_stream_in_sync(self):
+        """After a failed COMPUTE_ATOMIC the next request is answered correctly."""
+        class Flaky(DummyBackend):
+            def compute(self, atomic_numbers, *a, **kw):
+                if len(atomic_numbers) == 3:
+                    raise RuntimeError("intentional failure")
+                return super().compute(atomic_numbers, *a, **kw)
+
+        handle = _ServerHandle(_free_port(), Flaky(seed=0))
+        handle.start()
+        c, status, energy, e_at = self._roundtrip(handle, 3, *_simple_config(3))
+        assert status == STATUS_ERROR
+        np.testing.assert_array_equal(e_at, np.zeros(3))
+
+        c.sendall(struct.pack('<i', MSG_PING))
+        ping_status, = struct.unpack('<i', recv_exactly(c, 4))
+        c.sendall(struct.pack('<i', MSG_QUIT))
+        c.close()
+        assert ping_status == STATUS_OK
+        handle.join()
+
+
+# ── HESSIAN: status, then 9N² doubles if OK ───────────────────────────────────
+
+class TestHessian:
+    def test_lj_hessian_roundtrip(self, lj_server):
+        N = 3
+        Z   = np.full(N, 18, dtype=np.int32)
+        pos = np.array([[0, 0, 0], [1.2, 0, 0], [0.3, 1.1, 0.2]], dtype=np.float64)
+        cell, pbc = np.eye(3) * 100.0, np.array([False] * 3)
+        c = lj_server.connect()
+        c.sendall(_encode_compute(N, Z, pos, cell, pbc, False, msg_type=MSG_HESSIAN))
+        status, = struct.unpack('<i', recv_exactly(c, 4))
+        assert status == STATUS_OK
+        hess = np.frombuffer(recv_exactly(c, 9 * N * N * 8), dtype='<f8').reshape(3 * N, 3 * N)
+
+        ref = lj_server.backend.compute_hessian(Z, pos, cell, pbc, 0, 1)
+        np.testing.assert_allclose(hess, ref)
+        np.testing.assert_allclose(hess, hess.T)
+
+        # the connection is still in sync
+        c.sendall(_encode_compute(N, Z, pos, cell, pbc, False))
+        status2, _, _, _ = _read_response(c, N)
+        c.close()
+        assert status2 == STATUS_OK
+
+    def test_error_is_a_bare_status(self):
+        """A failed HESSIAN sends only the status word; the next request works."""
+        class Broken(DummyBackend):
+            def compute_hessian(self, *a, **kw):
+                raise RuntimeError("intentional failure")
+
+        handle = _ServerHandle(_free_port(), Broken(seed=0))
+        handle.start()
+        N = 2
+        c = handle.connect()
+        c.sendall(_encode_compute(N, *_simple_config(N), False, msg_type=MSG_HESSIAN))
+        status, = struct.unpack('<i', recv_exactly(c, 4))
+        assert status == STATUS_ERROR
+
+        c.sendall(struct.pack('<i', MSG_PING))
+        ping_status, = struct.unpack('<i', recv_exactly(c, 4))
+        c.sendall(struct.pack('<i', MSG_QUIT))
+        c.close()
+        assert ping_status == STATUS_OK
+        handle.join()
+
+    def test_wrong_shape_from_backend_is_an_error(self):
+        class Wrong(DummyBackend):
+            def compute_hessian(self, *a, **kw):
+                return np.zeros((3, 3))
+
+        handle = _ServerHandle(_free_port(), Wrong(seed=0))
+        handle.start()
+        c = handle.connect()
+        c.sendall(_encode_compute(2, *_simple_config(2), False, msg_type=MSG_HESSIAN))
+        status, = struct.unpack('<i', recv_exactly(c, 4))
+        c.sendall(struct.pack('<i', MSG_QUIT))
+        c.close()
+        assert status == STATUS_ERROR
+        handle.join()

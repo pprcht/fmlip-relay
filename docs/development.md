@@ -50,6 +50,12 @@ If the model already has an ASE calculator, subclass `_ASEComputeMixin` instead 
 
 An optional `close()` method is called at shutdown and can release temporary directories or GPU contexts.
 
+Per-atom energies need no extra work: `BackendBase.compute_atomic()` calls `compute()` and splits the total equally, and the ASE mixin reads the calculator's `energies` result when there is one.
+Override `compute_atomic()` only for a model with its own decomposition, and return `(energy, forces, stress, atomic_energies)` with the atomic energies summing to the total.
+
+The same holds for Hessians: `BackendBase.compute_hessian()` differentiates the forces numerically, and the ASE mixin calls the calculator's `get_hessian()` when it exists.
+Override it for a model with analytical second derivatives and return a symmetric `(3N, 3N)` array in eV/Å².
+
 **2. Register it** in `src/python/fmlip_relay/backends/__init__.py`, inside `_register_optional()`.
 The `try`/`except ImportError` keeps a missing dependency from breaking the other backends:
 
@@ -79,9 +85,9 @@ The suite needs no ML packages.
 
 | Module | Covers |
 |--------|--------|
-| `test_protocol.py` | Constants, `recv_exactly` and `send_all` edge cases, request round trips, response layout |
+| `test_protocol.py` | Constants, `recv_exactly` and `send_all` edge cases, request round trips, response layouts |
 | `test_backends.py` | `DummyBackend` output contract; Lennard-Jones constructor validation, analytical energies, force-shift continuity, finite-difference forces, stress symmetry, periodic images; unit conversion in the ASE mixin; the `custom` backend |
-| `test_server.py` | TCP integration: `PING`, sequential `COMPUTE` calls, `QUIT`, backend exceptions, unknown message types, client disconnects, `--exit-on-disconnect`, `--port 0` |
+| `test_server.py` | TCP integration: `PING`, sequential `COMPUTE` calls, `COMPUTE_ATOMIC`, `HESSIAN`, `QUIT`, backend exceptions, unknown message types, client disconnects, `--exit-on-disconnect`, `--port 0` |
 
 Tests that need `ase` are skipped when it is not installed.
 

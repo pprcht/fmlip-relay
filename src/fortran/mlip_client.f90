@@ -13,12 +13,19 @@
 !>       With "--port 0" the server binds a free port and announces it as
 !>       "READY <port>"; the announced port then overrides the port argument.
 !>
-!>   mlip_compute   (iid, natoms, positions, cell, pbc, compute_stress, charge, spin,
-!>                   energy, forces, stress, ierr)
+!>   mlip_compute   (iid, natoms, atomic_numbers, positions, cell, pbc,
+!>                   compute_stress, charge, spin,
+!>                   energy, forces, stress, ierr [, atomic_energies])
 !>       Send one COMPUTE request, receive energy/forces/stress.
+!>       With the optional atomic_energies(natoms) argument a COMPUTE_ATOMIC
+!>       request is sent instead and per-atom energies are returned as well.
 !>       charge (total charge) and spin (multiplicity 2S+1) are optional and
 !>       default to a neutral, ground-state singlet (charge=0, spin=1); they
 !>       are only used by charge/spin-aware backends (e.g. UMA omol).
+!>
+!>   mlip_hessian   (iid, natoms, atomic_numbers, positions, cell, pbc,
+!>                   hessian, ierr [, charge, spin])
+!>       Send one HESSIAN request, receive the (3N,3N) Hessian in eV/Ang^2.
 !>
 !>   mlip_ping      (iid, ierr)
 !>       Lightweight round-trip check.
@@ -45,7 +52,7 @@ module fmlip_relay_client
   private
 
   ! ── public symbols ──────────────────────────────────────────────────────────
-  public :: mlip_init,mlip_compute,mlip_ping,mlip_finalize,mlip_finalize_all
+  public :: mlip_init,mlip_compute,mlip_hessian,mlip_ping,mlip_finalize,mlip_finalize_all
   public :: MLIP_MAX_INSTANCES,MLIP_OK,MLIP_ERR,GET_PID
 
   ! ── constants ────────────────────────────────────────────────────────────────
@@ -57,6 +64,8 @@ module fmlip_relay_client
   integer,parameter :: MSG_COMPUTE = 1
   integer,parameter :: MSG_QUIT = 2
   integer,parameter :: MSG_PING = 3
+  integer,parameter :: MSG_COMPUTE_ATOMIC = 4
+  integer,parameter :: MSG_HESSIAN = 5
   integer,parameter :: STATUS_OK = 0
 
   ! ── C interfaces ─────────────────────────────────────────────────────────────
@@ -222,7 +231,28 @@ contains
   ! ════════════════════════════════════════════════════════════════════════════
   subroutine mlip_compute(iid,natoms,atomic_numbers,positions,cell,pbc,compute_stress, &
      &                    charge,spin, &
-     &                    energy,forces,stress,ierr)
+     &                    energy,forces,stress,ierr,atomic_energies)
+    !*******************************************************
+    !* Send one structure to the server of instance iid and
+    !* receive energy, forces and stress.
+    !*
+    !* Input:  positions(3,natoms) and cell (rows = lattice
+    !*         vectors) in Angstrom, pbc(3) and compute_stress
+    !*         as 0/1 flags, optional total charge (default 0)
+    !*         and spin multiplicity 2S+1 (default 1).
+    !* Output: energy in eV, forces(3,natoms) in eV/Angstrom,
+    !*         stress(3,3) in eV/Angstrom^3, ierr = MLIP_OK or
+    !*         MLIP_ERR.
+    !*
+    !* If the optional atomic_energies(natoms) is present,
+    !* per-atom energies in eV are requested as well (they
+    !* sum to energy). This needs a server that knows the
+    !* COMPUTE_ATOMIC message; an older one drops the
+    !* connection and ierr = MLIP_ERR.
+    !*
+    !* On a server-side error all outputs are zero and the
+    !* instance stays usable.
+    !*******************************************************
     integer,intent(in)   :: iid
     integer,intent(in)   :: natoms
     integer,intent(in)   :: atomic_numbers(natoms)  !< Z for each atom (e.g. 13=Al, 8=O)
@@ -236,16 +266,17 @@ contains
     real(wp),intent(out) :: forces(3,natoms)
     real(wp),intent(out) :: stress(3,3)
     integer,intent(out)  :: ierr
+    real(wp),intent(out),optional :: atomic_energies(natoms)  !< per-atom energies, eV
 
-    integer(c_int) :: hdr(2),pbc_c(3),stress_flag_c(1),status(1),rc
-    integer(c_int) :: atomic_numbers_c(natoms),charge_c(1),spin_c(1)
-    real(wp)       :: pos_buf(3*natoms),cell_buf(9),stress_buf(9),energy_buf(1)
-    integer        :: charge_l,spin_l
+    integer(c_int) :: status(1)
+    real(wp)       :: stress_buf(9),energy_buf(1)
+    integer        :: charge_l,spin_l,msg,rc
 
     ierr = MLIP_ERR
     energy = 0.0_wp
     forces = 0.0_wp
     stress = 0.0_wp
+    if (present(atomic_energies)) atomic_energies = 0.0_wp
 
     ! ── resolve optional charge/spin: neutral, ground-state singlet default ──
     charge_l = 0
@@ -258,60 +289,108 @@ contains
       write (stdout,'(A,I0)') "mlip_compute: instance not active, iid=",iid; return
     end if
 
-    ! ── pack positions (C-order: atom-major) ────────────────────────────────
-    pos_buf = reshape(positions, [3*natoms])
-    cell_buf = reshape(cell, [9])
-    pbc_c = int(pbc,c_int)
-    atomic_numbers_c = int(atomic_numbers,c_int)
-    stress_flag_c(1) = int(compute_stress,c_int)
-    charge_c(1) = int(charge_l,c_int)
-    spin_c(1) = int(spin_l,c_int)
-
-    ! ── send header: msg_type, natoms ────────────────────────────────────────
-    hdr(1) = int(MSG_COMPUTE,c_int)
-    hdr(2) = int(natoms,c_int)
-    rc = sock_send_bytes(iid,hdr,2*4); if (rc /= 0) return
-
-    ! ── send atomic numbers (natoms int32) ───────────────────────────────────
-    rc = sock_send_bytes(iid,atomic_numbers_c,natoms*4); if (rc /= 0) return
-
-    ! ── send positions (3*natoms float64) ───────────────────────────────────
-    rc = sock_send_r8(iid,pos_buf,3*natoms); if (rc /= 0) return
-
-    ! ── send cell (9 float64) ────────────────────────────────────────────────
-    rc = sock_send_r8(iid,cell_buf,9); if (rc /= 0) return
-
-    ! ── send pbc (3 int32) ───────────────────────────────────────────────────
-    rc = sock_send_bytes(iid,pbc_c,3*4); if (rc /= 0) return
-
-    ! ── send stress flag (1 int32) ───────────────────────────────────────────
-    rc = sock_send_bytes(iid,stress_flag_c,4); if (rc /= 0) return
-
-    ! ── send molecular charge (1 int32) ──────────────────────────────────────
-    rc = sock_send_bytes(iid,charge_c,4); if (rc /= 0) return
-
-    ! ── send spin multiplicity (1 int32) ─────────────────────────────────────
-    rc = sock_send_bytes(iid,spin_c,4); if (rc /= 0) return
+    msg = MSG_COMPUTE
+    if (present(atomic_energies)) msg = MSG_COMPUTE_ATOMIC
+    rc = send_structure(iid,msg,natoms,atomic_numbers,positions,cell,pbc, &
+       &                compute_stress,charge_l,spin_l)
+    if (rc /= 0) return
 
     ! ── receive status (int32) ───────────────────────────────────────────────
     rc = sock_recv_bytes(iid,status,4); if (rc /= 0) return
+
+    !>-- the response has the same length for OK and ERROR, so always read
+    !>   all of it; leftover bytes would be taken for the next response
+    rc = sock_recv_r8(iid,energy_buf,1); if (rc /= 0) return
+    rc = sock_recv_r8(iid,forces,3*natoms); if (rc /= 0) return
+    rc = sock_recv_r8(iid,stress_buf,9); if (rc /= 0) return
+    if (present(atomic_energies)) then
+      rc = sock_recv_r8(iid,atomic_energies,natoms); if (rc /= 0) return
+    end if
+
     if (status(1) /= STATUS_OK) then
+      forces = 0.0_wp
+      if (present(atomic_energies)) atomic_energies = 0.0_wp
       write (stdout,*) "mlip_compute: server returned error status"; return
     end if
 
-    ! ── receive energy (float64) ─────────────────────────────────────────────
-    rc = sock_recv_r8(iid,energy_buf,1); if (rc /= 0) return
     energy = energy_buf(1)
-
-    ! ── receive forces (3*natoms float64) ───────────────────────────────────
-    rc = sock_recv_r8(iid,forces,3*natoms); if (rc /= 0) return
-
-    ! ── receive stress (9 float64) ───────────────────────────────────────────
-    rc = sock_recv_r8(iid,stress_buf,9); if (rc /= 0) return
     stress = reshape(stress_buf, [3,3])
 
     ierr = MLIP_OK
   end subroutine mlip_compute
+
+  ! ════════════════════════════════════════════════════════════════════════════
+  !> mlip_hessian – send coordinates, receive the Hessian
+  ! ════════════════════════════════════════════════════════════════════════════
+  subroutine mlip_hessian(iid,natoms,atomic_numbers,positions,cell,pbc, &
+     &                    hessian,ierr,charge,spin)
+    !*******************************************************
+    !* Request the Hessian, the second derivatives of the
+    !* energy with respect to the atomic positions, from the
+    !* server of instance iid.
+    !*
+    !* Input:  as for mlip_compute; the cell is held fixed.
+    !* Output: hessian(3*natoms,3*natoms) in eV/Angstrom^2,
+    !*         symmetric; row/column 3*(i-1)+a is Cartesian
+    !*         component a of atom i. ierr = MLIP_OK/MLIP_ERR.
+    !*
+    !* Backends that can differentiate their model return an
+    !* analytical Hessian. All others take finite differences
+    !* of the forces on the server, i.e. 6*natoms force
+    !* evaluations, so the call can take long.
+    !*
+    !* Needs a server that knows the HESSIAN message; an
+    !* older one drops the connection and ierr = MLIP_ERR.
+    !*******************************************************
+    integer,intent(in)   :: iid
+    integer,intent(in)   :: natoms
+    integer,intent(in)   :: atomic_numbers(natoms)
+    real(wp),intent(in)  :: positions(3,natoms)     !< (xyz, atom), Angstrom
+    real(wp),intent(in)  :: cell(3,3)               !< row vectors
+    integer,intent(in)   :: pbc(3)                  !< 1=periodic, 0=not
+    real(wp),intent(out) :: hessian(3*natoms,3*natoms)
+    integer,intent(out)  :: ierr
+    integer,intent(in),optional :: charge           !< total charge (default 0)
+    integer,intent(in),optional :: spin             !< multiplicity 2S+1 (default 1)
+
+    integer(c_int) :: status(1)
+    integer        :: charge_l,spin_l,rc,j
+
+    ierr = MLIP_ERR
+    hessian = 0.0_wp
+
+    charge_l = 0
+    if (present(charge)) charge_l = charge
+    spin_l = 1
+    if (present(spin)) spin_l = spin
+    if (spin_l < 1) spin_l = 1
+
+    if (.not.instances(iid)%active) then
+      write (stdout,'(A,I0)') "mlip_hessian: instance not active, iid=",iid; return
+    end if
+
+    rc = send_structure(iid,MSG_HESSIAN,natoms,atomic_numbers,positions,cell,pbc, &
+       &                0,charge_l,spin_l)
+    if (rc /= 0) return
+
+    !>-- unlike COMPUTE, an ERROR status is not followed by any data
+    rc = sock_recv_bytes(iid,status,4); if (rc /= 0) return
+    if (status(1) /= STATUS_OK) then
+      write (stdout,*) "mlip_hessian: server returned error status"; return
+    end if
+
+    !>-- one column per receive keeps the transfer buffer small; the matrix
+    !>   is symmetric, so row- and column-major order coincide
+    do j = 1,3*natoms
+      rc = sock_recv_r8(iid,hessian(:,j),3*natoms)
+      if (rc /= 0) then
+        hessian = 0.0_wp
+        return
+      end if
+    end do
+
+    ierr = MLIP_OK
+  end subroutine mlip_hessian
 
   ! ════════════════════════════════════════════════════════════════════════════
   !> mlip_ping – check connectivity
@@ -383,6 +462,42 @@ contains
   ! ════════════════════════════════════════════════════════════════════════════
   !  Private helpers
   ! ════════════════════════════════════════════════════════════════════════════
+
+  function send_structure(iid,msg_type,natoms,atomic_numbers,positions,cell,pbc, &
+     &                    compute_stress,charge,spin) result(rc)
+    !***********************************************
+    !* Send the request shared by COMPUTE,
+    !* COMPUTE_ATOMIC and HESSIAN: message type and
+    !* structure. Returns 0 on success.
+    !***********************************************
+    integer,intent(in)  :: iid,msg_type,natoms
+    integer,intent(in)  :: atomic_numbers(natoms)
+    real(wp),intent(in) :: positions(3,natoms)
+    real(wp),intent(in) :: cell(3,3)
+    integer,intent(in)  :: pbc(3),compute_stress,charge,spin
+    integer :: rc
+    integer(c_int) :: hdr(2),tail(6),atomic_numbers_c(natoms)
+    real(wp)       :: pos_buf(3*natoms),cell_buf(9)
+
+    !>-- positions go out atom-major, which is their memory order
+    pos_buf = reshape(positions, [3*natoms])
+    cell_buf = reshape(cell, [9])
+    atomic_numbers_c = int(atomic_numbers,c_int)
+
+    hdr(1) = int(msg_type,c_int)
+    hdr(2) = int(natoms,c_int)
+    rc = sock_send_bytes(iid,hdr,2*4); if (rc /= 0) return
+    rc = sock_send_bytes(iid,atomic_numbers_c,natoms*4); if (rc /= 0) return
+    rc = sock_send_r8(iid,pos_buf,3*natoms); if (rc /= 0) return
+    rc = sock_send_r8(iid,cell_buf,9); if (rc /= 0) return
+
+    !>-- pbc(3), stress flag, charge, spin
+    tail(1:3) = int(pbc,c_int)
+    tail(4) = int(compute_stress,c_int)
+    tail(5) = int(charge,c_int)
+    tail(6) = int(spin,c_int)
+    rc = sock_send_bytes(iid,tail,6*4)
+  end function send_structure
 
   !> Send raw bytes via instance iid socket
   function sock_send_bytes(iid,buf,nbytes) result(rc)

@@ -110,6 +110,11 @@ module fmlip_relay_client
       integer(c_int)                     :: wait_for_line_c
     end function
 
+    subroutine term_process_c(pid) bind(C,name='term_process_c')
+      import c_int
+      integer(c_int),value :: pid
+    end subroutine
+
     subroutine kill_process_c(pid) bind(C,name='kill_process_c')
       import c_int
       integer(c_int),value :: pid
@@ -419,50 +424,78 @@ contains
   !> mlip_finalize – graceful shutdown of one instance
   ! ════════════════════════════════════════════════════════════════════════════
   subroutine mlip_finalize(iid,ierr)
+    !***********************************************
+    !* Shut down instance iid: send QUIT, close the
+    !* connection, terminate the server and wait
+    !* until it has exited. A no-op returning
+    !* MLIP_OK for an instance that is not active.
+    !***********************************************
     integer,intent(in)  :: iid
     integer,intent(out) :: ierr
-    integer(c_int) :: msg(1)
-    integer        :: rc
 
-    ierr = MLIP_ERR
-    if (.not.is_active(iid)) then
-      ierr = MLIP_OK; return    ! idempotent
-    end if
-
-    ! send QUIT
-    msg(1) = int(MSG_QUIT,c_int)
-    rc = sock_send_bytes(iid,msg,4)
-
-    ! close socket
-    call sock_close_c(int(instances(iid)%sock_fd,c_int))
-
-    ! close stdout pipe
-    if (instances(iid)%stdout_fd >= 0) &
-      call sock_close_c(int(instances(iid)%stdout_fd,c_int))
-
-    ! send SIGTERM just in case, and wait for the server process to exit
-    if (instances(iid)%proc_pid > 0) &
-      call kill_process_c(int(instances(iid)%proc_pid,c_int))
-
-    instances(iid) = mlip_instance_t()   ! reset to default
-    write (stdout,'(A,I0,A)') "[mlip_finalize] instance ",iid,": shut down"
     ierr = MLIP_OK
+    if (.not.is_active(iid)) return    ! idempotent
+
+    call request_shutdown(iid)
+    call await_shutdown(iid)
   end subroutine mlip_finalize
 
   ! ════════════════════════════════════════════════════════════════════════════
   !> mlip_finalize_all
   ! ════════════════════════════════════════════════════════════════════════════
   subroutine mlip_finalize_all(ierr)
+    !***********************************************
+    !* Shut down every active instance. All servers
+    !* are told to stop first and only then waited
+    !* for, so they exit side by side.
+    !***********************************************
     integer,intent(out) :: ierr
-    integer :: i,local_err
+    integer :: i
+    logical :: was_active(MLIP_MAX_INSTANCES)
+
     ierr = MLIP_OK
+    was_active = instances(:)%active
     do i = 1,MLIP_MAX_INSTANCES
-      if (instances(i)%active) then
-        call mlip_finalize(i,local_err)
-        if (local_err /= MLIP_OK) ierr = local_err
-      end if
+      if (was_active(i)) call request_shutdown(i)
+    end do
+    do i = 1,MLIP_MAX_INSTANCES
+      if (was_active(i)) call await_shutdown(i)
     end do
   end subroutine mlip_finalize_all
+
+  subroutine request_shutdown(iid)
+    !***********************************************
+    !* First half of a shutdown: send QUIT, close
+    !* socket and stdout pipe, send SIGTERM to the
+    !* server. Does not wait.
+    !***********************************************
+    integer,intent(in) :: iid
+    integer(c_int) :: msg(1)
+    integer        :: rc
+
+    msg(1) = int(MSG_QUIT,c_int)
+    rc = sock_send_bytes(iid,msg,4)
+    call sock_close_c(int(instances(iid)%sock_fd,c_int))
+    if (instances(iid)%stdout_fd >= 0) &
+      call sock_close_c(int(instances(iid)%stdout_fd,c_int))
+    if (instances(iid)%proc_pid > 0) &
+      call term_process_c(int(instances(iid)%proc_pid,c_int))
+    instances(iid)%active = .false.
+  end subroutine request_shutdown
+
+  subroutine await_shutdown(iid)
+    !***********************************************
+    !* Second half of a shutdown: wait for the
+    !* server to exit (it is killed after 10 s) and
+    !* free the instance slot.
+    !***********************************************
+    integer,intent(in) :: iid
+
+    if (instances(iid)%proc_pid > 0) &
+      call kill_process_c(int(instances(iid)%proc_pid,c_int))
+    instances(iid) = mlip_instance_t()   ! reset to default
+    write (stdout,'(A,I0,A)') "[mlip_finalize] instance ",iid,": shut down"
+  end subroutine await_shutdown
 
   ! ════════════════════════════════════════════════════════════════════════════
   !  Private helpers

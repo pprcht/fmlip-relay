@@ -186,10 +186,10 @@ call mlip_finalize(iid, ierr)
 call mlip_finalize_all(ierr)
 ```
 
-`mlip_finalize` sends `QUIT`, closes the socket, terminates the server's process group, and waits for the server process to exit.
+`mlip_finalize` sends `QUIT`, closes the socket, terminates the server's process group, and returns once the server has exited.
 A server that is still alive after 10 s is killed.
 Calling it on an inactive instance is a no-op that returns `MLIP_OK`.
-`mlip_finalize_all` does the same for every active instance.
+`mlip_finalize_all` does the same for every active instance; it signals all servers first and then waits, so they shut down side by side.
 
 ### Constants and helpers
 

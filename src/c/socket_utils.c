@@ -220,30 +220,41 @@ int wait_for_line_c(int fd, const char *prefix, int timeout_sec)
 }
 
 /**
- * Send SIGTERM to the process group led by pid and reap the child.
+ * Send SIGTERM to the process group led by pid, without waiting.
  * spawn_process_c() runs the command via "sh -c" in a new session, so pid
- * is the shell; if the shell forked instead of exec'ing, the server is a
- * child and only a group kill reaches it.  Falls back to pid alone.
+ * is the shell and leads the group; if the shell forked instead of
+ * exec'ing, the server is its child and only a group kill reaches it.
+ * Falls back to pid alone.
+ */
+void term_process_c(int pid)
+{
+    if (pid <= 0) return;
+    if (kill(-(pid_t)pid, SIGTERM) < 0) kill((pid_t)pid, SIGTERM);
+}
+
+/**
+ * Terminate the process group led by pid and wait until it is gone.
  *
- * The child is waited for, so it does not stay behind as a zombie for the
- * lifetime of the caller.  A server that has not exited after 10 s is
- * killed with SIGKILL.
+ * The direct child is reaped, so it does not stay behind as a zombie.  As
+ * the server may be a grandchild (see term_process_c), the group is then
+ * polled until it has no members left.  Whatever is still alive after 10 s
+ * is killed with SIGKILL.
  */
 void kill_process_c(int pid)
 {
-    int i, status;
-    pid_t r;
+    int i, status, reaped = 0;
 
     if (pid <= 0) return;
-    if (kill(-(pid_t)pid, SIGTERM) < 0) kill((pid_t)pid, SIGTERM);
+    term_process_c(pid);
 
     for (i = 0; i < 1000; i++) {
-        r = waitpid((pid_t)pid, &status, WNOHANG);
-        if (r != 0) return;     /* reaped, or not our child (r < 0) */
+        if (!reaped && waitpid((pid_t)pid, &status, WNOHANG) != 0) reaped = 1;
+        /* signal 0 only probes: ESRCH means the group is empty */
+        if (reaped && kill(-(pid_t)pid, 0) < 0 && errno == ESRCH) return;
         usleep(10000);          /* 10 ms */
     }
     if (kill(-(pid_t)pid, SIGKILL) < 0) kill((pid_t)pid, SIGKILL);
-    waitpid((pid_t)pid, &status, 0);
+    if (!reaped) waitpid((pid_t)pid, &status, 0);
 }
 
 

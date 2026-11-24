@@ -66,3 +66,10 @@ class BackendBase(ABC):
     def precision(self) -> str | None:
         """Floating-point precision (e.g. ``"float32"``), or None if N/A."""
         return getattr(self, "_dtype", None)
+
+    def close(self) -> None:
+        """Release resources (temp dirs, GPU contexts) on server shutdown.
+
+        Called once when the server exits, also after SIGTERM/SIGHUP/SIGINT.
+        The default does nothing.
+        """

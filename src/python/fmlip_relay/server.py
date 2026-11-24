@@ -5,7 +5,9 @@ Backend-agnostic TCP server loop.
 
 The server:
   1. Binds to 127.0.0.1:<port> and listens for one connection at a time.
-  2. Prints "READY" to stdout once listening – Fortran waits for this signal.
+     With port 0 the OS picks a free port.
+  2. Prints "READY <port>" to stdout once listening – Fortran waits for this
+     signal and connects to the announced port.
   3. Dispatches MSG_COMPUTE, MSG_PING, MSG_QUIT in a tight loop.
   4. Delegates all computation to the injected ``BackendBase`` instance.
 
@@ -57,11 +59,16 @@ def _handle_compute(conn: socket.socket, backend: BackendBase) -> None:
         write_error_response(conn, req.natoms)
 
 
-def _handle_client(conn: socket.socket, backend: BackendBase) -> bool:
+def _handle_client(conn: socket.socket, backend: BackendBase,
+                   exit_on_disconnect: bool = False) -> bool:
     """
     Process messages from one connected client.
     Returns True to keep the server running, False to shut it down.
+    With *exit_on_disconnect*, losing the client without a QUIT (disconnect,
+    unknown message, unexpected error) also shuts the server down, so a
+    server whose Fortran parent has died does not linger.
     """
+    keep_alive = not exit_on_disconnect
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     try:
         while True:
@@ -79,43 +86,46 @@ def _handle_client(conn: socket.socket, backend: BackendBase) -> bool:
 
             else:
                 log.error("Unknown message type %d – dropping client.", msg_type)
-                return True   # keep server alive, drop this connection
+                return keep_alive   # drop this connection
 
     except ConnectionError as exc:
         log.info("Client disconnected: %s", exc)
-        return True
+        return keep_alive
     except Exception:
         log.error("Unexpected error:\n%s", traceback.format_exc())
-        return True
+        return keep_alive
     finally:
         conn.close()
 
 
-def run(port: int, backend: BackendBase) -> None:
+def run(port: int, backend: BackendBase,
+        exit_on_disconnect: bool = False) -> None:
     """
     Start the server, block until a QUIT message is received.
 
     Parameters
     ----------
-    port    : TCP port to bind (loopback only).
+    port    : TCP port to bind (loopback only); 0 lets the OS pick one.
     backend : Initialised backend instance (model already loaded).
+    exit_on_disconnect : also stop when the client goes away without QUIT.
     """
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
     srv.listen(1)
+    actual_port = srv.getsockname()[1]
 
     log.info("fmlip_relay server listening on 127.0.0.1:%d  backend=%s  PID=%d",
-             port, backend.name, os.getpid())
+             actual_port, backend.name, os.getpid())
 
-    # Signal Fortran that we are ready to accept connections.
-    print("READY", flush=True)
+    # Signal Fortran that we are ready, and on which port.
+    print(f"READY {actual_port}", flush=True)
 
     keep_running = True
     while keep_running:
         conn, addr = srv.accept()
         log.debug("Connection from %s", addr)
-        keep_running = _handle_client(conn, backend)
+        keep_running = _handle_client(conn, backend, exit_on_disconnect)
 
     srv.close()
     log.info("Server stopped.")

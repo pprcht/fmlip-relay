@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "fmlip-relay"
+abstract: >
+  Persistent server for machine-learned interatomic potentials with a Fortran
+  client. The Python server loads a model once and answers energy, force,
+  stress, per-atom energy and Hessian requests over a loopback TCP socket.
+authors:
+  - family-names: "Pracht"
+    given-names: "Philipp"
+    orcid: "https://orcid.org/0000-0002-8495-9504"
+  - family-names: "Park"
+    given-names: "Soon Woo"
+    orcid: "https://orcid.org/0009-0002-4295-0605"
+version: "0.1.0"
+repository-code: "https://github.com/pprcht/fmlip-relay"
+url: "https://pprcht.github.io/fmlip-relay/"
+license: MIT
+keywords:
+  - machine-learned interatomic potentials
+  - Fortran
+  - computational chemistry
+  - molecular dynamics

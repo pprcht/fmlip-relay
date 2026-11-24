@@ -34,7 +34,7 @@ Run `fmlip-relay-check` to see which of these are usable in the current environm
 
 `--e-to-ev`, `--l-to-ang`
 : Unit conversion for models trained in other units, see [Server](server.md#models-in-other-units).
-  They apply to the ASE-based backends, i.e. all except `dummy`, `lj`, and `openmm`.
+  They apply to the ASE-based backends, i.e. all except `dummy`, `lj`, and `openmm`, which always work in Å and eV.
 
 ## Test backends
 
@@ -160,10 +160,7 @@ fmlip-relay-server --port 54321 --backend openmm --device cuda \
 
 YAML configuration files need `pyyaml`, and the OpenCG source needs the `OpenCGChromatin` package.
 
-:::{warning}
-This backend returns OpenMM's native units, **kJ/mol** for the energy and **kJ/mol/Å** for the forces, not eV.
-`--e-to-ev` and `--l-to-ang` have no effect on it, so the conversion is up to the calling code.
-:::
+OpenMM's native kJ/mol and bar are converted on the Python side, so the backend returns eV, eV/Å, and eV/Å³ like all others.
 
 ## Custom ASE calculators
 

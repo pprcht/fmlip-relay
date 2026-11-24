@@ -451,3 +451,53 @@ def test_nequip_cleans_tmpdir_on_failure(tmp_path, monkeypatch):
         NequIPBackend("/nonexistent/model.nequip.pt2")
     assert not [p for p in tmp_path.iterdir() if p.name.startswith("fmlip-relay-")]
     monkeypatch.setattr(tempfile, "tempdir", None)
+
+
+# ── openmm backend: results arrive in relay units (eV, Å) ─────────────────────
+
+class TestOpenMMBackend:
+    """An argon cluster from a GROMACS topology must match the LJ backend."""
+
+    TOP = """[ defaults ]
+1 2 no 1.0 1.0
+
+[ atomtypes ]
+AR 18 39.948 0.0 A 0.340 {eps_kjmol}
+
+[ moleculetype ]
+AR 1
+
+[ atoms ]
+1 AR 1 AR AR 1 0.0 39.948
+
+[ system ]
+Ar4
+
+[ molecules ]
+AR 4
+"""
+
+    def test_units_match_lj_backend(self, tmp_path):
+        pytest.importorskip("openmm")
+        from fmlip_relay.backends.openmm import OpenMMBackend
+
+        eps_ev, sigma = 0.0104, 3.40
+        pos = np.array([[0.0, 0.0, 0.0], [3.3, 0.0, 0.0],
+                        [1.65, 2.86, 0.0], [1.65, 0.953, 2.694]])
+        gro = "Ar4\n    4\n"
+        for i, (x, y, z) in enumerate(pos / 10.0):
+            gro += f"{i+1:5d}{'AR':<5s}{'AR':>5s}{i+1:5d}{x:8.3f}{y:8.3f}{z:8.3f}\n"
+        gro += "  10.00000  10.00000  10.00000\n"
+        (tmp_path / "ar4.gro").write_text(gro)
+        (tmp_path / "ar4.top").write_text(
+            self.TOP.format(eps_kjmol=eps_ev * 96.48533212331002))
+
+        args = (np.full(4, 18, dtype=np.int32), pos, np.eye(3) * 100.0,
+                np.zeros(3, dtype=bool), False, 0, 1)
+        omm = OpenMMBackend("GROMACS", str(tmp_path / "ar4.gro"),
+                            str(tmp_path / "ar4.top"), platform_name="reference")
+        e_omm, f_omm, _ = omm.compute(*args)
+        e_lj, f_lj, _ = LJBackend(epsilon=eps_ev, sigma=sigma, r_cut=500.0).compute(*args)
+
+        assert e_omm == pytest.approx(e_lj, rel=1e-4)
+        np.testing.assert_allclose(f_omm, f_lj, rtol=1e-4, atol=1e-7)

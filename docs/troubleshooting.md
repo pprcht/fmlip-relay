@@ -36,7 +36,6 @@ Use `--port 0` so that the operating system picks a free one, and `--exit-on-dis
 
 - `positions` and `forces` must be dimensioned `(3, natoms)` in Fortran, not `(natoms, 3)`.
 - The lattice vectors are the rows of `cell`.
-- The `openmm` backend returns kJ/mol and kJ/mol/Å instead of eV and eV/Å.
 - Both sides assume little-endian byte order, which holds on all x86 and ARM hardware.
 
 ## Type mismatch when compiling a `mlip_compute` call

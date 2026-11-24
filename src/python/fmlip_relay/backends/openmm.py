@@ -1,4 +1,8 @@
-"""OpenMM backend for fmlip_relay."""
+"""OpenMM backend for fmlip_relay.
+
+OpenMM works in kJ/mol and bar. Results are converted to the relay units
+(eV, eV/Å, eV/Å³) before they are returned.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +18,9 @@ from .opencg import validate_model as validate_opencg_model
 from .opencg import resolve_device_indices
 
 
-BAR_TO_KJMOL_PER_ANG3 = 6.02214076e-5
+# CODATA 2018 (exact): eV = 1.602176634e-19 J, N_A = 6.02214076e23 / mol
+KJMOL_TO_EV = 1.0 / 96.48533212331002
+BAR_TO_EV_PER_ANG3 = 1.0e-25 / 1.602176634e-19
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -188,6 +194,9 @@ class OpenMMBackend(BackendBase):
             dtype=np.float64,
         )
 
+        energy *= KJMOL_TO_EV
+        forces *= KJMOL_TO_EV
+
         if self._config["type"] == "opencg":
             forces = forces[self._real_indices]
 
@@ -195,7 +204,7 @@ class OpenMMBackend(BackendBase):
         if compute_stress:
             if not request_pbc:
                 raise ValueError("OpenMM stress tensor requires a periodic system")
-            stress = self._stress_tensor_bar() * BAR_TO_KJMOL_PER_ANG3
+            stress = self._stress_tensor_bar() * BAR_TO_EV_PER_ANG3
 
         return energy, forces, stress
 

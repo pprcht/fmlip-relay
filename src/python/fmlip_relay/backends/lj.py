@@ -150,10 +150,10 @@ class LJBackend(BackendBase):
             np.add.at(forces, i,   f_vec.sum(axis=0))
             np.add.at(forces, js, -f_vec)
 
-            # Stress tensor: σ_ab = -1/V Σ r_a F_b  (virial, outer product)
+            # Stress tensor σ = (1/V) dE/dε = -(1/V) Σ_pairs r_ij ⊗ F_ij, with
+            # F_ij = -f_vec the force on j. Positive under tension, as in ASE.
             if compute_stress:
-                # outer product summed over pairs: shape (3,3)
-                stress -= np.einsum('pi,pj->ij', dRm, f_vec)
+                stress += np.einsum('pi,pj->ij', dRm, f_vec)
 
         if compute_stress:
             vol = abs(np.linalg.det(cell))

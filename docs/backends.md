@@ -76,6 +76,7 @@ It has no dependencies and exists to validate the plumbing between Fortran and P
 
 A Lennard-Jones potential in pure NumPy with a force-shifted cutoff, so energy and force both go to zero continuously at the cutoff.
 Periodic systems are handled via the minimum-image convention.
+The stress follows the ASE sign convention (negative under compression), like all other backends.
 All atoms interact through the same parameters, regardless of element.
 
 | Flag | Default | Description |

@@ -21,6 +21,7 @@ import logging
 import os
 import socket
 import struct
+import sys
 import time
 import traceback
 
@@ -131,7 +132,8 @@ def _handle_client(conn: socket.socket, backend: BackendBase,
 
 
 def run(port: int, backend: BackendBase,
-        exit_on_disconnect: bool = False) -> None:
+        exit_on_disconnect: bool = False,
+        detach_stdout: bool = False) -> None:
     """
     Start the server, block until a QUIT message is received.
 
@@ -140,6 +142,9 @@ def run(port: int, backend: BackendBase,
     port    : TCP port to bind (loopback only); 0 lets the OS pick one.
     backend : Initialised backend instance (model already loaded).
     exit_on_disconnect : also stop when the client goes away without QUIT.
+    detach_stdout : after the READY line, point stdout at stderr. The client
+        reads the stdout pipe only until READY, so anything a model library
+        printed there later would fill the pipe and block the server.
     """
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -152,6 +157,9 @@ def run(port: int, backend: BackendBase,
 
     # Signal Fortran that we are ready, and on which port.
     print(f"READY {actual_port}", flush=True)
+    if detach_stdout:
+        sys.stdout.flush()
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
 
     keep_running = True
     while keep_running:

@@ -16,6 +16,7 @@ fmlip-relay-server --port 54321 --backend uma --uma-task omol --device cuda
 The server loads the backend, binds the port on `127.0.0.1`, and prints `READY <port>` to standard output.
 It then serves one client at a time until it receives `QUIT`.
 Log messages go to standard error; the client scans standard output for the `READY` line only.
+After that line the server redirects its standard output to standard error, so that a model library printing during the run cannot fill the unread pipe and stall the server.
 
 The server only listens on the loopback interface and performs no authentication.
 Client and server must run on the same machine.

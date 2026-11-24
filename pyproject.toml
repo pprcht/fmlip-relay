@@ -1,5 +1,5 @@
 [build-system]
-requires      = ["setuptools>=68", "wheel"]
+requires      = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,9 +7,21 @@ name        = "fmlip-relay"
 version     = "0.1.0"
 description = "Persistent ML potential server for Fortran clients"
 readme      = "README.md"
-license     = { file = "LICENSE" }
+license     = "MIT"
+license-files = ["LICENSE"]
 authors     = [{name = "Philipp Pracht"}]
 requires-python = ">=3.10"
+
+keywords = ["machine learning potentials", "MLIP", "Fortran", "MACE", "UMA"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Fortran",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 
 dependencies = [
     "numpy>=1.24",
@@ -55,6 +67,11 @@ docs = [
     "myst-parser",
     "sphinx-argparse",
 ]
+
+[project.urls]
+Homepage = "https://github.com/pprcht/fmlip-relay"
+Documentation = "https://pprcht.github.io/fmlip-relay/"
+Issues = "https://github.com/pprcht/fmlip-relay/issues"
 
 [project.scripts]
 fmlip-relay-server = "fmlip_relay.__main__:main"

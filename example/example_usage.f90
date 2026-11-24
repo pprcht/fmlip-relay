@@ -112,7 +112,7 @@ program example_usage
   call build_server_cmd(backend_name,model_arg,BASE_PORT+1, &  !> BASE_PORT could be replaced with pid
                         lj_epsilon,lj_sigma,lj_cutoff,server_cmd)
   call mlip_init(1,BASE_PORT+1,trim(server_cmd),TIMEOUT_SEC,ierr)
-  if (ierr /= MLIP_OK) stop "mlip_init failed"
+  if (ierr /= MLIP_OK) error stop "mlip_init failed"
 
   call mlip_ping(1,ierr)
   if (ierr == MLIP_OK) write (stdout,*) " PING OK"
@@ -123,7 +123,7 @@ program example_usage
   !                     stress=stress,ierr=ierr)
   call mlip_compute(1,NATOMS,atomic_numbers,positions,cell,pbc,1,0,1, &
                     energy,forces,stress,ierr)
-  if (ierr /= MLIP_OK) stop "mlip_compute failed"
+  if (ierr /= MLIP_OK) error stop "mlip_compute failed"
 
   write (stdout,'(A,F16.8,A)') "  Energy          = ",energy," eV"
   write (stdout,'(A,3F12.6)') "  Forces[atom 1]  = ",forces(:,1)
@@ -142,15 +142,16 @@ program example_usage
   pid = get_pid()
   write (stdout,*) "Process PID:",pid
 
-  !> NOTE we are using the PID to assign communication channels in this example
+  !>-- port 0: every server takes a free port from the OS and announces it,
+  !>   so the instances can not collide with each other or with other jobs
   do i = 1,NINSTANCES
 
-    call build_server_cmd(backend_name,model_arg,pid+i, &
+    call build_server_cmd(backend_name,model_arg,0, &
                           lj_epsilon,lj_sigma,lj_cutoff,server_cmd)
-    call mlip_init(i,pid+i,trim(server_cmd),TIMEOUT_SEC,ierr)
+    call mlip_init(i,0,trim(server_cmd),TIMEOUT_SEC,ierr)
 
     if (ierr /= MLIP_OK) then
-      write (stdout,'(A,I0)') "mlip_init failed for instance ",i; stop
+      write (stdout,'(A,I0)') "mlip_init failed for instance ",i; error stop
     end if
   end do
 

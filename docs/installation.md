@@ -103,6 +103,8 @@ meson setup _build -Dbuild_example=true
 meson compile -C _build
 ```
 
+The example is built as `_build/example/fmlip-relay-example` here, whereas CMake and the plain Makefile call it `run_example`.
+
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `openmp` | `true` | Enable OpenMP |
@@ -125,12 +127,12 @@ This is also the shortest recipe for vendoring the client: copy `mlip_client.f90
 `run_example` starts one server, runs a ping and a compute call, then starts several servers and evaluates them from an OpenMP parallel region:
 
 ```bash
-./build/run_example dummy
-./build/run_example lj
-./build/run_example lj 0.0104 3.40 8.50      # epsilon / eV, sigma / Å, cutoff / Å
-./build/run_example mace_mp medium-mpa-0
-./build/run_example mace_off small
-./build/run_example mace /path/to/model.model
+./build/example/run_example dummy
+./build/example/run_example lj
+./build/example/run_example lj 0.0104 3.40 8.50      # epsilon / eV, sigma / Å, cutoff / Å
+./build/example/run_example mace_mp medium-mpa-0
+./build/example/run_example mace_off small
+./build/example/run_example mace /path/to/model.model
 ```
 
 The example spawns `fmlip-relay-server` by name, so the Python package must be installed in the active environment.

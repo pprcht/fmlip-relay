@@ -47,7 +47,7 @@ pip install ".[mace]"         # or another backend extra, e.g. uma, nequip, deep
 
 cmake -S . -B build -DBUILD_EXAMPLE=ON
 cmake --build build
-./build/run_example lj        # spawns servers, runs a few evaluations, shuts down
+./build/example/run_example lj        # spawns servers, runs a few evaluations, shuts down
 ```
 
 Check a backend without any Fortran code:

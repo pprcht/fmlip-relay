@@ -626,3 +626,30 @@ class TestHessian:
         fine = lj.compute_hessian(*args)
         assert not np.array_equal(coarse, fine)
         np.testing.assert_allclose(coarse, fine, rtol=1e-2, atol=1e-6)
+
+
+# ── stress sign convention: σ = (1/V) dE/dε, as in ASE ────────────────────────
+
+class TestStressConvention:
+    def test_lj_stress_is_strain_derivative_of_energy(self):
+        lj   = LJBackend(epsilon=1.0, sigma=1.0, r_cut=2.5)
+        rng  = np.random.default_rng(3)
+        a    = 1.5                                   # compressed: positive pressure
+        frac = np.array([[0, 0, 0], [.5, .5, 0], [.5, 0, .5], [0, .5, .5]])
+        cell = np.eye(3) * a * 2
+        pos  = np.concatenate([(frac + s) * a for s in np.ndindex(2, 2, 2)])
+        pos  = pos + rng.normal(scale=0.02, size=pos.shape)
+        Z    = np.full(len(pos), 18, dtype=np.int32)
+        pbc  = np.array([True] * 3)
+        _, _, stress = lj.compute(Z, pos, cell, pbc, True)
+
+        vol, h = abs(np.linalg.det(cell)), 1e-5
+        for i, j in [(0, 0), (1, 1), (0, 1)]:
+            def energy(eps):
+                strain = np.eye(3)
+                strain[i, j] += eps / 2
+                strain[j, i] += eps / 2
+                return lj.compute(Z, pos @ strain, cell @ strain, pbc, False)[0]
+            numerical = (energy(h) - energy(-h)) / (2 * h) / vol
+            assert stress[i, j] == pytest.approx(numerical, rel=1e-5, abs=1e-8)
+        assert np.trace(stress) < 0                  # compressed solid

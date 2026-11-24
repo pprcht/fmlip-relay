@@ -170,6 +170,11 @@ contains
       write (stdout,'(A,I0)') "mlip_init: instance already active, iid=",iid; return
     end if
 
+    !>-- a longer command would be cut off silently and fail in obscure ways
+    if (len_trim(server_cmd) > len(cmd_c)-1) then
+      write (stdout,'(A,I0,A)') "mlip_init: server command exceeds ",len(cmd_c)-1," characters"; return
+    end if
+
     ! ── convert server_cmd to null-terminated C string ──────────────────────
     call f_to_c_str(server_cmd,cmd_c)
 
@@ -285,7 +290,7 @@ contains
     if (present(spin)) spin_l = spin
     if (spin_l < 1) spin_l = 1   ! multiplicity 2S+1 is >= 1; clamp stray 0
 
-    if (.not.instances(iid)%active) then
+    if (.not.is_active(iid)) then
       write (stdout,'(A,I0)') "mlip_compute: instance not active, iid=",iid; return
     end if
 
@@ -365,7 +370,7 @@ contains
     if (present(spin)) spin_l = spin
     if (spin_l < 1) spin_l = 1
 
-    if (.not.instances(iid)%active) then
+    if (.not.is_active(iid)) then
       write (stdout,'(A,I0)') "mlip_hessian: instance not active, iid=",iid; return
     end if
 
@@ -402,7 +407,7 @@ contains
     integer        :: rc
 
     ierr = MLIP_ERR
-    if (.not.instances(iid)%active) return
+    if (.not.is_active(iid)) return
 
     msg(1) = int(MSG_PING,c_int)
     rc = sock_send_bytes(iid,msg,4); if (rc /= 0) return
@@ -420,7 +425,7 @@ contains
     integer        :: rc
 
     ierr = MLIP_ERR
-    if (.not.instances(iid)%active) then
+    if (.not.is_active(iid)) then
       ierr = MLIP_OK; return    ! idempotent
     end if
 
@@ -435,7 +440,7 @@ contains
     if (instances(iid)%stdout_fd >= 0) &
       call sock_close_c(int(instances(iid)%stdout_fd,c_int))
 
-    ! send SIGTERM just in case
+    ! send SIGTERM just in case, and wait for the server process to exit
     if (instances(iid)%proc_pid > 0) &
       call kill_process_c(int(instances(iid)%proc_pid,c_int))
 
@@ -462,6 +467,19 @@ contains
   ! ════════════════════════════════════════════════════════════════════════════
   !  Private helpers
   ! ════════════════════════════════════════════════════════════════════════════
+
+  function is_active(iid) result(active)
+    !***********************************************
+    !* True if iid is a valid instance id with a
+    !* running server; guards the instance table
+    !* against out-of-range ids.
+    !***********************************************
+    integer,intent(in) :: iid
+    logical :: active
+    active = .false.
+    if (iid < 1.or.iid > MLIP_MAX_INSTANCES) return
+    active = instances(iid)%active
+  end function is_active
 
   function send_structure(iid,msg_type,natoms,atomic_numbers,positions,cell,pbc, &
      &                    compute_stress,charge,spin) result(rc)

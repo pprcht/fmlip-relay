@@ -493,7 +493,8 @@ def main(argv: list[str] | None = None) -> None:
                                         hessian=args.hessian))
 
         # ── server mode ───────────────────────────────────────────────────────
-        server.run(args.port, backend, exit_on_disconnect=args.exit_on_disconnect)
+        server.run(args.port, backend, exit_on_disconnect=args.exit_on_disconnect,
+                   detach_stdout=True)
     finally:
         backend.close()
 

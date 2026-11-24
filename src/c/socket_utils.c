@@ -16,6 +16,15 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/wait.h>
+
+/* macOS has no MSG_NOSIGNAL; SO_NOSIGPIPE on the socket does the same job */
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 /* ── connect ──────────────────────────────────────────────────────────────── */
 
@@ -31,6 +40,11 @@ int sock_connect_c(const char *host_c, int port)
     /* disable Nagle for low-latency request/response */
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+#ifdef SO_NOSIGPIPE
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
+    /* servers spawned later must not inherit this connection */
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -102,17 +116,18 @@ void sock_close_c(int fd)
  * stdout_fd_out is set to the read end of a pipe connected to child stdout,
  * so the caller can wait for the "READY" line.
  */
-#include <fcntl.h>
-#include <signal.h>
-#include <time.h>
-
 int spawn_process_c(const char *cmd, int *stdout_fd_out)
 {
     int pipefd[2];
     if (pipe(pipefd) < 0) { perror("pipe"); return -1; }
 
     pid_t pid = fork();
-    if (pid < 0) { perror("fork"); return -1; }
+    if (pid < 0) {
+        perror("fork");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return -1;
+    }
 
     if (pid == 0) {
         /* child */
@@ -127,6 +142,7 @@ int spawn_process_c(const char *cmd, int *stdout_fd_out)
 
     /* parent */
     close(pipefd[1]);          /* close write end */
+    fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
     *stdout_fd_out = pipefd[0];
     return (int)pid;
 }
@@ -204,15 +220,30 @@ int wait_for_line_c(int fd, const char *prefix, int timeout_sec)
 }
 
 /**
- * Send SIGTERM to the process group led by pid.
+ * Send SIGTERM to the process group led by pid and reap the child.
  * spawn_process_c() runs the command via "sh -c" in a new session, so pid
  * is the shell; if the shell forked instead of exec'ing, the server is a
  * child and only a group kill reaches it.  Falls back to pid alone.
+ *
+ * The child is waited for, so it does not stay behind as a zombie for the
+ * lifetime of the caller.  A server that has not exited after 10 s is
+ * killed with SIGKILL.
  */
 void kill_process_c(int pid)
 {
+    int i, status;
+    pid_t r;
+
     if (pid <= 0) return;
     if (kill(-(pid_t)pid, SIGTERM) < 0) kill((pid_t)pid, SIGTERM);
+
+    for (i = 0; i < 1000; i++) {
+        r = waitpid((pid_t)pid, &status, WNOHANG);
+        if (r != 0) return;     /* reaped, or not our child (r < 0) */
+        usleep(10000);          /* 10 ms */
+    }
+    if (kill(-(pid_t)pid, SIGKILL) < 0) kill((pid_t)pid, SIGKILL);
+    waitpid((pid_t)pid, &status, 0);
 }
 
 

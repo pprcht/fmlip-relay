@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
 
 jobs:
   test:
@@ -21,8 +22,31 @@ jobs:
       - name: Run tests
         run: pytest
 
+  # Fortran/C client: both build systems, then the example end to end
+  # against the dummy and Lennard-Jones servers.
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install server and build tools
+        run: pip install . meson ninja
+      - name: CMake build, install and example
+        run: |
+          cmake -S . -B build -DBUILD_EXAMPLE=ON
+          cmake --build build
+          cmake --install build --prefix "$PWD/install"
+          ./build/example/run_example dummy
+          ./build/example/run_example lj
+      - name: Meson build
+        run: |
+          meson setup _build -Dbuild_example=true
+          meson compile -C _build
+
   build:
-    needs: test
+    needs: [test, client]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

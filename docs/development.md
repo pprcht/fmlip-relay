@@ -61,11 +61,11 @@ except ImportError:
     pass
 ```
 
-For this to work, import heavy dependencies inside `__init__` of the class, or accept that a module-level import failure removes the backend from the registry.
+The existing backends import their heavy dependencies inside `__init__` of the class, so the module itself always imports and the missing package is reported when the server starts.
 
 **3. Wire up the command line** in `src/python/fmlip_relay/__main__.py`: add an argument group in `_build_parser()` if the backend has its own options, and a branch in `_build_backend()` that maps the parsed arguments to constructor keywords.
 
-Then add a row to `docs/backends.md` and a probe to `check.py`.
+Then add a row to `docs/backends.md` and an entry to `_BACKENDS` in `check.py`, listing the packages the backend needs so that `fmlip-relay-check` can report on it.
 
 ## Tests
 

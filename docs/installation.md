@@ -40,7 +40,7 @@ Request access on the model page and authenticate once with `huggingface-cli log
 
 ### Checking the environment
 
-`fmlip-relay-check` probes every known backend and reports which ones are importable:
+`fmlip-relay-check` looks up the packages each backend needs and reports which backends are usable:
 
 ```console
 $ fmlip-relay-check
@@ -51,19 +51,24 @@ Core dependencies
   ✓ ok  numpy          numpy 2.1.0
 
 ML dependencies
-  ✓ ok  torch          torch 2.8.0+cu128
-            CUDA available: True
-  ✓ ok  mace-torch     mace-torch 0.3.16
+  ✓ ok  torch            torch 2.8.0
+                          CUDA available: True
+  ✓ ok  ase              ase 3.26.0
+  ✓ ok  mace-torch       mace-torch 0.3.16
+  ✗ unavailable  nequip           No module named 'nequip'
   ...
 
 Available backends
   ✓ ok  --backend dummy       Random numbers, no deps
   ✓ ok  --backend lj          Lennard-Jones, no deps
   ✓ ok  --backend mace        Custom MACE model from file
+  ✗ unavailable  --backend nequip      Compiled NequIP model
+             missing: nequip
   ...
 ```
 
-A backend whose dependencies are missing is left out of the registry instead of breaking the import, so the server reports it as an unknown backend.
+Most backends import their packages only when the server constructs them.
+Starting a server with a backend whose packages are missing therefore fails at startup with an `ImportError` naming the package.
 
 ## Fortran/C library
 

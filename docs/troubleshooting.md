@@ -11,14 +11,15 @@ The server never got as far as printing `READY`.
 - A large model on a cold filesystem, or a first-time checkpoint download, can exceed a short timeout.
   Increase `timeout_sec`.
 
-## Unknown backend
+## Server exits with an `ImportError`
 
 ```
-Unknown backend 'mace'. Available backends: dummy, lj
+ImportError: MACE is not installed. Run: pip install mace-torch
 ```
 
-The backend's dependencies failed to import, so it was never registered.
-`fmlip-relay-check` shows which package is missing.
+The packages of the selected backend are missing from the environment the server runs in.
+From Fortran this shows up as a `READY` timeout.
+`fmlip-relay-check` lists the missing packages per backend.
 
 ## Failed to connect after READY
 

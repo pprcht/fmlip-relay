@@ -49,6 +49,12 @@ dev = [
     "pytest",
     "pytest-cov",
 ]
+docs = [
+    "sphinx>=8.2.3",
+    "shibuya",
+    "myst-parser",
+    "sphinx-argparse",
+]
 
 [project.scripts]
 fmlip-relay-server = "fmlip_relay.__main__:main"
